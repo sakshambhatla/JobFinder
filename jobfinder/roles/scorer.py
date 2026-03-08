@@ -81,7 +81,7 @@ def _call_gemini(prompt: str, config: AppConfig) -> str:
             config=types.GenerateContentConfig(system_instruction=_SYSTEM_PROMPT),
         )
     except ClientError as exc:
-        if exc.status_code == 429:
+        if getattr(exc, "code", None) == 429:
             raise RateLimitError(str(exc)) from exc
         raise
     return response.text
