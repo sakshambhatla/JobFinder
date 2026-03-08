@@ -25,7 +25,7 @@ class AppConfig(BaseModel):
     # Model name used when provider = "anthropic"
     anthropic_model: str = "claude-sonnet-4-6"
     # Model name used when provider = "gemini"
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.5-flash"
     max_companies: int = 15
     # Default refresh behaviour for discover-companies and discover-roles
     refresh: bool = False
@@ -43,8 +43,11 @@ def load_config(config_path: str | None = None, **overrides: object) -> AppConfi
     """Load config from JSON file, then apply CLI overrides."""
     values: dict = {}
 
-    if config_path and Path(config_path).exists():
-        with open(config_path) as f:
+    # Default to config.json in the working directory when no explicit path is given.
+    # This ensures the API server reads the same config as the CLI.
+    resolved_path = config_path or "config.json"
+    if Path(resolved_path).exists():
+        with open(resolved_path) as f:
             values = json.load(f)
 
     # Apply non-None overrides from CLI flags (bool False is a valid override)
