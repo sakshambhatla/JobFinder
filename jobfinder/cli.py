@@ -164,7 +164,7 @@ def discover_companies(
 def discover_roles_cmd(
     ctx: click.Context, company: str | None, refresh: bool
 ) -> None:
-    """Scrape open roles from discovered companies' career pages."""
+    """Read open roles from discovered companies' career pages via public ATS APIs."""
     from jobfinder.roles.discovery import discover_roles
     from jobfinder.storage.schemas import DiscoveredCompany
 

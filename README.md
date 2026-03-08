@@ -1,7 +1,7 @@
 # JobFinder
 
 A Python CLI that reads your resumes, uses an LLM to discover relevant companies,
-and scrapes open job roles from those companies' career pages via public ATS APIs.
+and reads open job roles from those companies' career pages via public ATS APIs.
 
 ## Setup
 
@@ -13,6 +13,9 @@ source .venv/bin/activate
 
 # Install (first time or after pulling changes)
 pip install -e .
+
+# Create your personal config from the example (do not commit config.json)
+cp config.example.json config.json
 ```
 
 ### API Keys
