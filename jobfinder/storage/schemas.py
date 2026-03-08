@@ -46,6 +46,7 @@ class DiscoveredRole(BaseModel):
     updated_at: str | None = None
     published_at: str | None = None
     fetched_at: str = ""
+    relevance_score: int | None = None
 
 
 class FlaggedCompany(BaseModel):

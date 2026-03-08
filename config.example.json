@@ -12,5 +12,7 @@
     "posted_after": "Jan 1, 2026",
     "location": "SF, Seattle, NY or Remote",
     "confidence": "high"
-  }
+  },
+  "relevance_score_criteria": "big data, data pipelines, spark, flink, distributed systems, platform engineering",
+  "write_preference": "overwrite"
 }

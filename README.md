@@ -114,10 +114,12 @@ Edit `config.json` to change defaults. All fields are optional.
   "request_timeout": 30,
   "role_filters": {
     "title": "Engineering Manager",
-    "posted_after": "Feb 20, 2026",
+    "posted_after": "Jan 1, 2026",
     "location": "SF, Seattle, NY or Remote",
     "confidence": "high"
-  }
+  },
+  "relevance_score_criteria": "big data, data pipelines, spark, flink, distributed systems",
+  "write_preference": "overwrite"
 }
 ```
 
@@ -134,9 +136,11 @@ Set any `role_filters` field to `null` (or omit it) to skip that filter. Omit `r
 | `refresh` | `false` | Re-run discovery even if output files already exist |
 | `request_timeout` | `30` | HTTP timeout in seconds for ATS API calls |
 | `role_filters.title` | `null` | Job title to match (semantic, e.g. `"Engineering Manager"`) |
-| `role_filters.posted_after` | `null` | Only show roles posted after this date (e.g. `"Feb 20, 2026"`) |
+| `role_filters.posted_after` | `null` | Only show roles posted after this date (e.g. `"Jan 1, 2026"`) |
 | `role_filters.location` | `null` | Location(s) to match (e.g. `"SF, Seattle, NY or Remote"`) |
 | `role_filters.confidence` | `"high"` | Match threshold: `"high"`, `"medium"`, or `"low"` |
+| `relevance_score_criteria` | `null` | Keywords/description for scoring roles 1–10 (e.g. `"spark, flink, data pipelines"`); roles sorted highest-first in output |
+| `write_preference` | `"overwrite"` | `"overwrite"` replaces existing output; `"merge"` combines with existing data, deduplicates, and re-sorts |
 
 CLI flags override config file values (e.g. `--max-companies 25` overrides `max_companies`).
 

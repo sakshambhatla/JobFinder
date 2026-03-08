@@ -31,6 +31,10 @@ class AppConfig(BaseModel):
     refresh: bool = False
     request_timeout: int = 30
     role_filters: RoleFilters | None = None
+    # Natural language description used to score each role 1–10 for relevance
+    relevance_score_criteria: str | None = None
+    # "overwrite": replace existing output file; "merge": combine with existing, sort by score
+    write_preference: str = "overwrite"
 
 
 def load_config(config_path: str | None = None, **overrides: object) -> AppConfig:

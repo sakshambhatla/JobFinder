@@ -136,6 +136,20 @@ def discover_companies(
     resume_text = "".join(r.get("full_text", "") for r in resumes)
     resume_hash = hashlib.sha256(resume_text.encode()).hexdigest()[:16]
 
+    # Merge with existing companies if configured
+    if config.write_preference == "merge" and store.exists("companies.json"):
+        existing_data = store.read("companies.json") or {}
+        from jobfinder.storage.schemas import DiscoveredCompany
+        existing = [
+            DiscoveredCompany.model_validate(c)
+            for c in existing_data.get("companies", [])
+        ]
+        seen: dict[str, object] = {c.name.lower(): c for c in existing}
+        for c in companies:  # new takes precedence
+            seen[c.name.lower()] = c
+        companies = list(seen.values())
+        console.print(f"  [dim]Merged → {len(companies)} total companies[/dim]")
+
     output = {
         "discovered_at": datetime.now(timezone.utc).isoformat(),
         "source_resume_hash": resume_hash,
@@ -177,8 +191,8 @@ def discover_roles_cmd(
         )
         raise SystemExit(1)
 
-    # If filters are configured, ensure the API key is available up front
-    if config.role_filters:
+    # If filters or scoring are configured, ensure the API key is available up front
+    if config.role_filters or config.relevance_score_criteria:
         require_api_key(config.model_provider)
 
     effective_refresh = refresh or config.refresh
@@ -219,6 +233,27 @@ def discover_roles_cmd(
             f"[bold]{len(filtered_roles)}[/bold] after filtering[/dim]"
         )
 
+    # Apply LLM-based relevance scoring if configured
+    scored_roles = filtered_roles
+    if config.relevance_score_criteria and filtered_roles:
+        from jobfinder.roles.scorer import score_roles
+        scored_roles = score_roles(filtered_roles, config.relevance_score_criteria, config)
+
+    # Merge with existing roles if configured
+    final_roles = scored_roles
+    if config.write_preference == "merge" and store.exists("roles.json"):
+        from jobfinder.storage.schemas import DiscoveredRole
+        existing_data = store.read("roles.json") or {}
+        existing_roles = [
+            DiscoveredRole.model_validate(r)
+            for r in existing_data.get("roles", [])
+        ]
+        seen: dict[str, DiscoveredRole] = {r.url: r for r in existing_roles}
+        for r in scored_roles:  # new takes precedence
+            seen[r.url] = r
+        final_roles = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+        console.print(f"  [dim]Merged → {len(final_roles)} total roles[/dim]")
+
     output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "total_roles": len(roles),
@@ -226,7 +261,7 @@ def discover_roles_cmd(
         "companies_fetched": len(companies) - len(flagged),
         "companies_flagged": len(flagged),
         "flagged_companies": [f.model_dump() for f in flagged],
-        "roles": [r.model_dump() for r in filtered_roles],
+        "roles": [r.model_dump() for r in final_roles],
     }
     store.write("roles.json", output)
 
@@ -234,8 +269,10 @@ def discover_roles_cmd(
     summary = f"Found {len(roles)} roles from {len(companies) - len(flagged)} companies"
     if config.role_filters:
         summary += f", {len(filtered_roles)} matched filters"
+    if config.relevance_score_criteria:
+        summary += ", scored and sorted by relevance"
     display_success(summary + ".")
-    if filtered_roles:
+    if final_roles:
         display_roles(output["roles"])
     display_flagged(output["flagged_companies"])
 

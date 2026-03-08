@@ -25,6 +25,7 @@ jobfinder/
   roles/
     discovery.py    # discover_roles() — iterates companies, accumulates roles + flagged
     filters.py      # filter_roles() — LLM-based title/date/location filter, batched 50/call
+    scorer.py       # score_roles() — LLM assigns 1-10 relevance score, batched 30/call, returns sorted
     ats/
       __init__.py   # ATS_REGISTRY dict: ats_type str → fetcher instance
       base.py       # BaseFetcher ABC, ATSFetchError, UnsupportedATSError
@@ -33,7 +34,7 @@ jobfinder/
       ashby.py      # api.ashbyhq.com/posting-api/job-board/{token}
       unsupported.py# raises UnsupportedATSError (Workday/LinkedIn/unknown)
   storage/
-    schemas.py      # ParsedResume, DiscoveredCompany, DiscoveredRole, FlaggedCompany
+    schemas.py      # ParsedResume, DiscoveredCompany, DiscoveredRole (has relevance_score), FlaggedCompany
     store.py        # StorageManager: atomic JSON read/write (temp file + rename)
   utils/
     http.py         # get_json(url, timeout) with manual retry
@@ -55,6 +56,8 @@ role_filters.title    string | null                     — semantic job title f
 role_filters.posted_after  string | null               — date filter (natural language)
 role_filters.location string | null                    — location filter (natural language)
 role_filters.confidence  "high" | "medium" | "low"    — LLM match threshold (default "high")
+relevance_score_criteria  string | null                — keywords/description; LLM scores roles 1-10, sorted highest-first
+write_preference      "overwrite" | "merge"            — overwrite replaces file; merge deduplicates + re-sorts (default "overwrite")
 ```
 API keys come from env only: `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`.
 
