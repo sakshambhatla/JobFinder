@@ -7,7 +7,7 @@ from jobfinder.config import AppConfig, RoleFilters
 from jobfinder.storage.schemas import DiscoveredRole
 from jobfinder.utils.display import console
 
-BATCH_SIZE = 50
+BATCH_SIZE = 100
 
 _CONFIDENCE_INSTRUCTIONS = {
     "high": (

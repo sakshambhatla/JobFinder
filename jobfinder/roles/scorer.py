@@ -7,17 +7,20 @@ from jobfinder.config import AppConfig
 from jobfinder.storage.schemas import DiscoveredRole
 from jobfinder.utils.display import console
 
-BATCH_SIZE = 30
+BATCH_SIZE = 60
 
 _SYSTEM_PROMPT = """\
 You are a job relevance scorer. Given scoring criteria and a numbered list of job postings,
-assign each posting a relevance score from 1 to 10 (10 = most relevant, 1 = least relevant).
+assign each posting a relevance score (1–10) and a brief summary of its key differentiators.
 
 Score based solely on how well the posting matches the provided criteria.
 Be precise — use the full 1–10 range, not just extremes.
 
-Return ONLY a valid JSON object mapping 0-based index (as string) to score (as integer).
-Example: {"0": 9, "1": 3, "2": 7}
+Summary: 1–2 phrases capturing what makes this role distinctive (e.g. team focus, tech stack,
+seniority level, domain). Max 15 words. Do NOT repeat the job title.
+
+Return ONLY a valid JSON object mapping 0-based index (as string) to {"score": int, "summary": str}.
+Example: {"0": {"score": 9, "summary": "Platform eng, Spark/Flink, 5+ yrs"}, "1": {"score": 3, "summary": "Mobile infra, iOS-heavy"}}
 No explanation, no markdown.\
 """
 
@@ -25,13 +28,11 @@ No explanation, no markdown.\
 def _build_prompt(roles: list[DiscoveredRole], criteria: str) -> str:
     postings = []
     for i, role in enumerate(roles):
-        date = role.posted_at or role.published_at or role.updated_at or "no date"
         parts = [
             f"{i}.",
             f"title={role.title!r}",
             f"company={role.company_name!r}",
             f"location={role.location!r}",
-            f"date={date!r}",
         ]
         if role.department:
             parts.append(f"dept={role.department!r}")
@@ -52,7 +53,7 @@ def _call_anthropic(prompt: str, config: AppConfig) -> str:
     client = anthropic.Anthropic()
     response = client.messages.create(
         model=config.anthropic_model,
-        max_tokens=512,
+        max_tokens=1024,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -75,7 +76,7 @@ def _call_gemini(prompt: str, config: AppConfig) -> str:
     return response.text
 
 
-def _call_llm(prompt: str, config: AppConfig) -> dict[int, int]:
+def _call_llm(prompt: str, config: AppConfig) -> dict[int, dict]:
     raw = (
         _call_gemini(prompt, config)
         if config.model_provider == "gemini"
@@ -87,7 +88,17 @@ def _call_llm(prompt: str, config: AppConfig) -> dict[int, int]:
         return {}
     try:
         data = json.loads(raw[start : end + 1])
-        return {int(k): max(1, min(10, int(v))) for k, v in data.items()}
+        result: dict[int, dict] = {}
+        for k, v in data.items():
+            idx = int(k)
+            if isinstance(v, dict):
+                score = max(1, min(10, int(v.get("score", 5))))
+                summary = str(v.get("summary", "")).strip() or None
+                result[idx] = {"score": score, "summary": summary}
+            elif isinstance(v, (int, float)):
+                # Graceful fallback if LLM omits summary
+                result[idx] = {"score": max(1, min(10, int(v))), "summary": None}
+        return result
     except (json.JSONDecodeError, ValueError):
         return {}
 
@@ -97,7 +108,7 @@ def score_roles(
     criteria: str,
     config: AppConfig,
 ) -> list[DiscoveredRole]:
-    """Score each role 1–10 for relevance using the LLM, then sort highest-first."""
+    """Score each role 1–10 and generate a summary, then sort highest-first."""
     console.print(f"\nScoring [bold]{len(roles)}[/bold] roles for relevance...")
 
     for batch_start in range(0, len(roles), BATCH_SIZE):
@@ -113,6 +124,7 @@ def score_roles(
 
         for i, role in enumerate(batch):
             if i in scores:
-                role.relevance_score = scores[i]
+                role.relevance_score = scores[i]["score"]
+                role.summary = scores[i].get("summary")
 
     return sorted(roles, key=lambda r: -(r.relevance_score or 0))
