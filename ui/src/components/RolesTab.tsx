@@ -12,8 +12,10 @@ import {
   discoverRoles,
   getRoles,
   getRolesCheckpoint,
+  getCompanyRegistry,
   type DiscoveredRole,
   type FlaggedCompany,
+  type CompanyRegistryEntry,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -173,8 +175,132 @@ function FlaggedBox({ flagged }: { flagged: FlaggedCompany[] }) {
   );
 }
 
+// ─── Source selector (Last Run vs Registry) ───────────────────────────────────
+
+const modeBtn = (active: boolean) =>
+  [
+    "px-4 py-1.5 rounded-lg text-sm font-semibold transition-all",
+    active
+      ? "bg-white/20 text-white border border-white/30"
+      : "bg-transparent text-white/45 border border-transparent hover:text-white/70 hover:bg-white/08",
+  ].join(" ");
+
+function CompanySourceCard({
+  registry,
+  sourceMode,
+  setSourceMode,
+  selectedNames,
+  setSelectedNames,
+  registrySearch,
+  setRegistrySearch,
+}: {
+  registry: CompanyRegistryEntry[];
+  sourceMode: "last-run" | "registry";
+  setSourceMode: (m: "last-run" | "registry") => void;
+  selectedNames: string[];
+  setSelectedNames: (n: string[]) => void;
+  registrySearch: string;
+  setRegistrySearch: (s: string) => void;
+}) {
+  const available = registry.filter(
+    (e) =>
+      !selectedNames.includes(e.name) &&
+      e.name.toLowerCase().includes(registrySearch.toLowerCase()),
+  );
+
+  return (
+    <Card>
+      <CardContent className="pt-5 pb-4 space-y-4">
+        {/* Mode toggle */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-semibold text-white/45 uppercase tracking-wider mr-2">
+            Company Source
+          </span>
+          <button className={modeBtn(sourceMode === "last-run")} onClick={() => setSourceMode("last-run")}>
+            Last Discovery Run
+          </button>
+          <button className={modeBtn(sourceMode === "registry")} onClick={() => setSourceMode("registry")}>
+            Select from Registry
+          </button>
+        </div>
+
+        {sourceMode === "last-run" ? (
+          <p className="text-xs text-white/40">
+            Uses all companies from the previous Discover Companies run.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {/* Search */}
+            <Input
+              placeholder="Search registry…"
+              value={registrySearch}
+              onChange={(e) => setRegistrySearch(e.target.value)}
+              className="h-8 text-sm"
+            />
+
+            {/* Selected chips */}
+            {selectedNames.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedNames.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => setSelectedNames(selectedNames.filter((n) => n !== name))}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium
+                               bg-white/20 text-white border border-white/25 hover:bg-white/30 transition-colors"
+                  >
+                    {name}
+                    <span className="text-white/60 leading-none">×</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Available list */}
+            {registry.length === 0 ? (
+              <p className="text-xs text-white/35 italic">
+                Registry is empty — run Discover Companies first.
+              </p>
+            ) : available.length === 0 && selectedNames.length > 0 ? (
+              <p className="text-xs text-white/35 italic">All matching companies selected.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                {available.map((e) => (
+                  <button
+                    key={e.name}
+                    onClick={() => setSelectedNames([...selectedNames, e.name])}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
+                               bg-white/08 text-white/60 border border-white/12
+                               hover:bg-white/15 hover:text-white/90 hover:border-white/25 transition-colors"
+                  >
+                    {e.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {selectedNames.length === 0 && (
+              <p className="text-xs text-amber-400/70">
+                ↑ Click companies above to add them to your selection.
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Main tab ─────────────────────────────────────────────────────────────────
+
 export function RolesTab() {
   const qc = useQueryClient();
+
+  // Source selection state
+  const [sourceMode, setSourceMode] = useState<"last-run" | "registry">("last-run");
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [registrySearch, setRegistrySearch] = useState("");
+
+  // Filter / scoring state
   const [titleFilter, setTitleFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [postedAfter, setPostedAfter] = useState("");
@@ -195,12 +321,23 @@ export function RolesTab() {
     refetchInterval: false,
   });
 
+  // Company registry for the source selector
+  const { data: registry = [] } = useQuery({
+    queryKey: ["company-registry"],
+    queryFn: getCompanyRegistry,
+    retry: false,
+  });
+
+  const canDiscover =
+    sourceMode === "last-run" || (sourceMode === "registry" && selectedNames.length > 0);
+
   const discover = useMutation({
     mutationFn: (resume: boolean) => {
       const hasFilters = titleFilter || locationFilter || postedAfter;
       return discoverRoles({
         resume,
         refresh: true,
+        company_names: sourceMode === "registry" ? selectedNames : undefined,
         role_filters: hasFilters
           ? {
               title: titleFilter || undefined,
@@ -256,6 +393,17 @@ export function RolesTab() {
         </div>
       )}
 
+      {/* Company source selector */}
+      <CompanySourceCard
+        registry={registry}
+        sourceMode={sourceMode}
+        setSourceMode={setSourceMode}
+        selectedNames={selectedNames}
+        setSelectedNames={setSelectedNames}
+        registrySearch={registrySearch}
+        setRegistrySearch={setRegistrySearch}
+      />
+
       {/* Filter form */}
       <Card>
         <CardContent className="pt-6">
@@ -297,10 +445,10 @@ export function RolesTab() {
               />
             </div>
           </div>
-          <div className="mt-4">
+          <div className="mt-4 flex items-center gap-3">
             <Button
               onClick={() => discover.mutate(false)}
-              disabled={discover.isPending}
+              disabled={discover.isPending || !canDiscover}
             >
               {discover.isPending ? (
                 <>
@@ -311,6 +459,11 @@ export function RolesTab() {
                 "Discover Roles"
               )}
             </Button>
+            {sourceMode === "registry" && selectedNames.length > 0 && (
+              <span className="text-xs text-white/40">
+                {selectedNames.length} {selectedNames.length === 1 ? "company" : "companies"} selected
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>

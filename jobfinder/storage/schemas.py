@@ -55,3 +55,10 @@ class FlaggedCompany(BaseModel):
     ats_type: str
     career_page_url: str
     reason: str
+
+
+class CompanyRegistryEntry(BaseModel):
+    name: str
+    ats_type: str = "unknown"
+    ats_board_token: str | None = None
+    career_page_url: str = ""

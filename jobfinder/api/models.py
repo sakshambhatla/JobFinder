@@ -16,7 +16,7 @@ class RoleFiltersRequest(BaseModel):
 
 
 class DiscoverRolesRequest(BaseModel):
-    company: str | None = None  # limit to one company
+    company_names: list[str] | None = None  # limit to specific companies from registry
     refresh: bool = False
     resume: bool = False  # resume from checkpoint if one exists
     role_filters: RoleFiltersRequest | None = None  # overrides config.role_filters

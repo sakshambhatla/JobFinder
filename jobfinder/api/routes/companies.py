@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from jobfinder.api.models import DiscoverCompaniesRequest
 from jobfinder.companies.discovery import discover_companies
 from jobfinder.config import load_config, require_api_key
+from jobfinder.storage.registry import upsert_registry
 from jobfinder.storage.schemas import DiscoveredCompany
 from jobfinder.storage.store import StorageManager
 
@@ -15,7 +16,9 @@ router = APIRouter()
 
 
 @router.post("/companies/discover")
-async def discover_companies_endpoint(req: DiscoverCompaniesRequest) -> dict:
+async def discover_companies_endpoint(
+    req: DiscoverCompaniesRequest, request: Request
+) -> dict:
     """Run LLM-based company discovery and return the results."""
     overrides: dict = {}
     if req.max_companies is not None:
@@ -68,7 +71,18 @@ async def discover_companies_endpoint(req: DiscoverCompaniesRequest) -> dict:
     }
     store.write("companies.json", output)
 
+    # Upsert discovered companies into the perpetual registry
+    upsert_registry(store, companies)
+    from jobfinder.api.main import reload_registry
+    reload_registry(request.app)
+
     return output
+
+
+@router.get("/companies/registry")
+async def get_company_registry(request: Request) -> dict:
+    """Return all companies from the perpetual registry (served from memory)."""
+    return {"companies": request.app.state.registry}
 
 
 @router.get("/companies")

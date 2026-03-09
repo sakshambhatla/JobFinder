@@ -157,6 +157,10 @@ def discover_companies(
     }
     store.write("companies.json", output)
 
+    # Upsert into the perpetual company registry
+    from jobfinder.storage.registry import upsert_registry
+    upsert_registry(store, companies)
+
     display_success(f"Discovered {len(companies)} companies.")
     display_companies(output["companies"])
 
@@ -164,9 +168,10 @@ def discover_companies(
 @cli.command("discover-roles")
 @click.option(
     "--company",
+    "company_names",
     type=str,
-    default=None,
-    help="Fetch roles for a specific company only",
+    multiple=True,
+    help="Fetch roles for this company from the registry (repeatable: --company Stripe --company Redfin)",
 )
 @click.option(
     "--refresh",
@@ -182,7 +187,7 @@ def discover_companies(
 )
 @click.pass_context
 def discover_roles_cmd(
-    ctx: click.Context, company: str | None, refresh: bool, resume: bool
+    ctx: click.Context, company_names: tuple[str, ...], refresh: bool, resume: bool
 ) -> None:
     """Read open roles from discovered companies' career pages via public ATS APIs."""
     from jobfinder.roles.checkpoint import CHECKPOINT_FILENAME, Checkpoint
@@ -194,9 +199,15 @@ def discover_roles_cmd(
     store = StorageManager(config.data_dir)
     cp = Checkpoint(store.data_dir / CHECKPOINT_FILENAME)
 
-    if not store.exists("companies.json"):
+    from jobfinder.storage.registry import REGISTRY_FILENAME, load_or_bootstrap_registry
+
+    # Seed the registry from companies.json if it doesn't exist yet
+    load_or_bootstrap_registry(store)
+
+    if not store.exists("companies.json") and not company_names:
         display_error(
-            "No companies found. Run 'jobfinder discover-companies' first."
+            "No companies found. Run 'jobfinder discover-companies' first, "
+            "or specify companies with --company."
         )
         raise SystemExit(1)
 
@@ -213,7 +224,7 @@ def discover_roles_cmd(
             display_flagged(existing.get("flagged_companies", []))
         return
 
-    companies_data = store.read("companies.json")
+    companies_data = store.read("companies.json") or {}
     raw_companies = companies_data.get("companies", [])
 
     # ── Determine whether to resume or start fresh ────────────────────────────
@@ -233,16 +244,28 @@ def discover_roles_cmd(
         if resume and not cp.exists():
             console.print("[yellow]No checkpoint found — starting fresh.[/yellow]")
 
-        # Filter to specific company if requested
-        if company:
-            raw_companies = [
-                c for c in raw_companies if company.lower() in c["name"].lower()
-            ]
-            if not raw_companies:
-                display_error(f"No company matching '{company}' found in companies.json.")
+        # Resolve companies from registry or last-run file
+        if company_names:
+            reg_data = store.read(REGISTRY_FILENAME) or {}
+            reg_map = {e["name"].lower(): e for e in reg_data.get("companies", [])}
+            selected_entries, missing = [], []
+            for name in company_names:
+                entry = reg_map.get(name.lower())
+                if entry:
+                    selected_entries.append(entry)
+                else:
+                    missing.append(name)
+            if missing:
+                display_error(f"Not found in registry: {', '.join(missing)}")
                 raise SystemExit(1)
-
-        companies = [DiscoveredCompany.model_validate(c) for c in raw_companies]
+            companies = [
+                DiscoveredCompany.model_validate(
+                    {**e, "reason": "", "discovered_at": "", "roles_fetched": False}
+                )
+                for e in selected_entries
+            ]
+        else:
+            companies = [DiscoveredCompany.model_validate(c) for c in raw_companies]
         console.print(f"Fetching roles from [bold]{len(companies)}[/bold] companies...\n")
 
         roles, flagged = discover_roles(companies, config)

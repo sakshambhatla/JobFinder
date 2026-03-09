@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from jobfinder.api.models import DiscoverRolesRequest
 from jobfinder.config import RoleFilters, load_config, require_api_key
@@ -21,12 +21,15 @@ def _make_checkpoint(store: StorageManager) -> Checkpoint:
 
 
 @router.post("/roles/discover")
-async def discover_roles_endpoint(req: DiscoverRolesRequest) -> dict:
+async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -> dict:
     """Fetch open roles from ATS APIs, then apply filters and scoring.
 
     Set ``resume=true`` to continue a previous run that was interrupted by a
     rate-limit error.  The raw roles and partial filter/score progress are
     loaded from the checkpoint file instead of re-fetching from ATS APIs.
+
+    Set ``company_names`` to fetch roles only for specific companies from the
+    registry.  Omit to use all companies from the last discovery run.
     """
     overrides: dict = {}
     if req.relevance_score_criteria is not None:
@@ -39,11 +42,13 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest) -> dict:
     cp = _make_checkpoint(store)
 
     companies_data = store.read("companies.json")
-    if not companies_data:
+    # Require companies.json only when not using registry selection and not resuming
+    if companies_data is None and not req.company_names and not (req.resume and cp.exists()):
         raise HTTPException(
             status_code=400,
             detail="No companies found. Run company discovery first.",
         )
+    companies_data = companies_data or {}
 
     # Ensure API key is present if LLM features are needed
     if config.role_filters or config.relevance_score_criteria:
@@ -67,18 +72,23 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest) -> dict:
         ]
         resume_score_batches = cp.score_batches_done
     else:
-        # Fresh run — fetch from ATS APIs
-        raw_companies = companies_data.get("companies", [])
-
-        if req.company:
-            raw_companies = [
-                c for c in raw_companies if req.company.lower() in c["name"].lower()
-            ]
-            if not raw_companies:
+        # Fresh run — resolve companies from registry or last-run file
+        if req.company_names:
+            registry: list[dict] = request.app.state.registry
+            reg_map = {e["name"].lower(): e for e in registry}
+            selected = [reg_map[n.lower()] for n in req.company_names if n.lower() in reg_map]
+            missing = [n for n in req.company_names if n.lower() not in reg_map]
+            if missing:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"No company matching '{req.company}' found.",
+                    detail=f"Companies not found in registry: {', '.join(missing)}",
                 )
+            raw_companies = [
+                {**e, "reason": "", "discovered_at": "", "roles_fetched": False}
+                for e in selected
+            ]
+        else:
+            raw_companies = companies_data.get("companies", [])
 
         companies = [DiscoveredCompany.model_validate(c) for c in raw_companies]
 

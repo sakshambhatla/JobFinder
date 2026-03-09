@@ -88,6 +88,18 @@ export async function getCompanies(): Promise<{ companies: DiscoveredCompany[] }
   return data;
 }
 
+export interface CompanyRegistryEntry {
+  name: string;
+  ats_type: string;
+  ats_board_token: string | null;
+  career_page_url: string;
+}
+
+export async function getCompanyRegistry(): Promise<CompanyRegistryEntry[]> {
+  const { data } = await api.get<{ companies: CompanyRegistryEntry[] }>("/companies/registry");
+  return data.companies;
+}
+
 // ─── Roles ────────────────────────────────────────────────────────────────────
 
 export interface RoleFiltersParams {
@@ -98,7 +110,7 @@ export interface RoleFiltersParams {
 }
 
 export interface DiscoverRolesParams {
-  company?: string;
+  company_names?: string[];
   refresh?: boolean;
   resume?: boolean;
   role_filters?: RoleFiltersParams;
