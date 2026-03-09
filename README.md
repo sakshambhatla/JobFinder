@@ -101,7 +101,8 @@ jobfinder discover-companies
   --refresh                Re-run even if companies.json already exists
 
 jobfinder discover-roles
-  --company TEXT           Fetch roles for one specific company only
+  --company TEXT           Fetch roles for this company from the registry
+                           (repeatable: --company Stripe --company Redfin)
   --refresh                Re-fetch even if roles.json already exists
 
 jobfinder --config PATH    Use a custom config file (default: config.json)
@@ -119,10 +120,10 @@ jobfinder discover-companies --max-companies 25
 # Re-run company discovery after updating your resume
 jobfinder discover-companies --refresh
 
-# Check a single company
-jobfinder discover-roles --company "Stripe"
+# Fetch roles for specific companies from the registry
+jobfinder discover-roles --company "Stripe" --company "Redfin"
 
-# Full refresh of roles
+# Full refresh of roles (all companies from last discovery run)
 jobfinder discover-roles --refresh
 ```
 
@@ -186,7 +187,8 @@ All output is written to `data/`:
 | File | Contents |
 |------|----------|
 | `data/resumes.json` | Parsed resume data (skills, titles, sections) |
-| `data/companies.json` | LLM's company suggestions with ATS metadata |
+| `data/companies.json` | LLM's company suggestions with ATS metadata (last run) |
+| `data/company_registry.json` | Perpetual registry of all companies ever discovered; grows with every Discover Companies run; used by `--company` and the "Select from Registry" UI panel |
 | `data/roles.json` | Fetched roles + companies flagged for manual check |
 
 ## ATS Support
