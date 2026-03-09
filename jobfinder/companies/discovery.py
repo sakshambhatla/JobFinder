@@ -21,6 +21,7 @@ def discover_companies(
         raw_text = _call_anthropic(resumes, config)
 
     companies = _parse_response(raw_text)
+    _validate_companies(companies, timeout=config.request_timeout)
 
     now = datetime.now(timezone.utc).isoformat()
     for c in companies:
@@ -68,13 +69,58 @@ def _call_gemini(resumes: list[dict], config: AppConfig) -> str:
     for chunk in client.models.generate_content_stream(
         model=config.gemini_model,
         contents=user_prompt,
-        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+        ),
     ):
         if chunk.text:
             print(chunk.text, end="", flush=True)
             chunks.append(chunk.text)
     print("\n")  # blank line after stream
     return "".join(chunks)
+
+
+def _head(url: str, timeout: int = 10) -> bool:
+    """Return True if url responds with a 2xx or 3xx status code."""
+    import httpx
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            r = client.head(url)
+            if r.status_code == 405:  # HEAD not allowed → try GET
+                r = client.get(url)
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
+_ATS_CHECK_URLS: dict[str, str] = {
+    "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{token}/jobs",
+    "lever": "https://api.lever.co/v0/postings/{token}",
+    "ashby": "https://api.ashbyhq.com/posting-api/job-board/{token}",
+}
+
+
+def _validate_companies(companies: list[DiscoveredCompany], timeout: int = 10) -> None:
+    """Validate career_page_url and ats_board_token in place; log warnings for failures."""
+    from jobfinder.utils.display import console
+
+    for c in companies:
+        if c.career_page_url:
+            if not _head(c.career_page_url, timeout=timeout):
+                console.print(
+                    f"  [yellow]⚠[/yellow] {c.name}: career_page_url unreachable — cleared"
+                )
+                c.career_page_url = ""
+
+        if c.ats_type in _ATS_CHECK_URLS and c.ats_board_token:
+            check_url = _ATS_CHECK_URLS[c.ats_type].format(token=c.ats_board_token)
+            if not _head(check_url, timeout=timeout):
+                console.print(
+                    f"  [yellow]⚠[/yellow] {c.name}: ats_board_token "
+                    f"'{c.ats_board_token}' not found on {c.ats_type} — cleared"
+                )
+                c.ats_board_token = None
 
 
 def _parse_response(raw_text: str) -> list[DiscoveredCompany]:

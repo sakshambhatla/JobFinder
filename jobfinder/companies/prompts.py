@@ -8,7 +8,11 @@ and industry background.
 For each company, provide:
 - name: Company name
 - reason: 1-2 sentence explanation of why it's a good fit
-- career_page_url: URL of their careers/jobs page
+- career_page_url: URL of their careers/jobs page. IMPORTANT: this must be the \
+real, currently accessible URL of the company's careers or jobs listing page. \
+Do not guess or fabricate URLs — use the most canonical, well-known URL for the \
+company's jobs listing (e.g. https://www.lifeatspotify.com/jobs, not a generic \
+company homepage path like /careers).
 - ats_type: One of "greenhouse", "lever", "ashby", "workday", "linkedin", or "unknown"
 - ats_board_token: The board token/slug used in the ATS API URL (e.g. for \
 Greenhouse it's the slug in boards.greenhouse.io/SLUG, for Lever it's the slug \
