@@ -37,6 +37,8 @@ class AppConfig(BaseModel):
     write_preference: str = "overwrite"
     # Max LLM requests per minute (client-side throttle). Set to 0 to disable.
     rpm_limit: int = 4
+    # Print full raw API error responses alongside formatted summaries.
+    debug: bool = False
 
 
 def load_config(config_path: str | None = None, **overrides: object) -> AppConfig:

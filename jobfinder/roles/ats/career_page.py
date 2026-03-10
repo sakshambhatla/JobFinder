@@ -101,22 +101,43 @@ def _call_anthropic(html: str, config: AppConfig) -> str:
     return result.content[0].text  # type: ignore[union-attr]
 
 
-def _call_gemini(html: str, config: AppConfig) -> str:
+def _call_gemini(html: str, config: AppConfig, *, _attempt: int = 0) -> str:
+    import os
+    import time
+
     from jobfinder.utils.throttle import get_limiter
 
     get_limiter(config.rpm_limit).wait()
 
-    import os
-
     from google import genai
     from google.genai import types
+    from google.genai.errors import ClientError
+
+    from jobfinder.utils.display import console
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    response = client.models.generate_content(
-        model=config.gemini_model,
-        contents=f"Extract job listings from this career page HTML:\n\n{html}",
-        config=types.GenerateContentConfig(system_instruction=_SYSTEM_PROMPT),
-    )
+    try:
+        response = client.models.generate_content(
+            model=config.gemini_model,
+            contents=f"Extract job listings from this career page HTML:\n\n{html}",
+            config=types.GenerateContentConfig(system_instruction=_SYSTEM_PROMPT),
+        )
+    except ClientError as exc:
+        if getattr(exc, "code", None) == 429:
+            from jobfinder.utils.gemini_errors import log_gemini_429
+
+            summary, is_daily, retry_wait = log_gemini_429(
+                exc, config.gemini_model, config.debug, console
+            )
+            if not is_daily and _attempt < 3:
+                console.print(
+                    f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
+                )
+                time.sleep(retry_wait)
+                return _call_gemini(html, config, _attempt=_attempt + 1)
+            # Career page is best-effort — treat exhaustion as empty page, never raise
+            return ""
+        raise
     return response.text or ""
 
 

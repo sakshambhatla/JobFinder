@@ -55,29 +55,56 @@ def _call_anthropic(resumes: list[dict], config: AppConfig) -> str:
     return "".join(chunks)
 
 
-def _call_gemini(resumes: list[dict], config: AppConfig) -> str:
+def _call_gemini(resumes: list[dict], config: AppConfig, *, _attempt: int = 0) -> str:
+    import time
+
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
 
     from google import genai
     from google.genai import types
+    from google.genai.errors import ClientError
+
+    from jobfinder.utils.display import console
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     user_prompt = build_user_prompt(resumes, config.max_companies)
 
     print()  # blank line before stream
     chunks: list[str] = []
-    for chunk in client.models.generate_content_stream(
-        model=config.gemini_model,
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
-    ):
-        if chunk.text:
-            print(chunk.text, end="", flush=True)
-            chunks.append(chunk.text)
+    try:
+        for chunk in client.models.generate_content_stream(
+            model=config.gemini_model,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        ):
+            if chunk.text:
+                print(chunk.text, end="", flush=True)
+                chunks.append(chunk.text)
+    except ClientError as exc:
+        if getattr(exc, "code", None) == 429:
+            from jobfinder.utils.gemini_errors import log_gemini_429
+
+            summary, is_daily, retry_wait = log_gemini_429(
+                exc, config.gemini_model, config.debug, console
+            )
+            if not is_daily and _attempt < 3:
+                console.print(
+                    f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
+                )
+                time.sleep(retry_wait)
+                return _call_gemini(resumes, config, _attempt=_attempt + 1)
+
+            tip = (
+                "Daily quota resets at midnight Pacific. Try gemini_model='gemini-2.0-flash' or model_provider='anthropic'."
+                if is_daily
+                else "Per-minute retries exhausted. Try model_provider='anthropic'."
+            )
+            raise RuntimeError(f"{summary}\n{tip}") from exc
+        raise
     print("\n")  # blank line after stream
     return "".join(chunks)
 

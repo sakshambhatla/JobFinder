@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 
 from jobfinder.config import AppConfig, RoleFilters
@@ -123,39 +122,24 @@ def _call_gemini(prompt: str, system_prompt: str, config: AppConfig, *, _attempt
         )
     except ClientError as exc:
         if getattr(exc, "code", None) == 429:
-            detail = str(exc)
-            console.print(f"[yellow]  Gemini 429 detail: {detail}[/yellow]")
-            dl = detail.lower()
+            from jobfinder.utils.gemini_errors import log_gemini_429
 
-            # Daily quota takes priority — retrying won't help until tomorrow.
-            # When daily is exhausted Gemini also zeroes the per-minute bucket,
-            # so check daily first before deciding whether to retry.
-            is_daily = "perday" in dl or "per_day" in dl
-            is_per_minute = "perminute" in dl or "per_minute" in dl
-
-            if is_per_minute and not is_daily and _attempt < 3:
-                # Use the retry delay the API returned, or fall back to 65 s.
-                m = re.search(r"retry in ([\d.]+)s", dl)
-                wait = int(float(m.group(1))) + 5 if m else 65
+            summary, is_daily, retry_wait = log_gemini_429(
+                exc, config.gemini_model, config.debug, console
+            )
+            if not is_daily and _attempt < 3:
                 console.print(
-                    f"[yellow]  RPM limit — waiting {wait}s, retry {_attempt + 1}/3...[/yellow]"
+                    f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
                 )
-                time.sleep(wait)
+                time.sleep(retry_wait)
                 return _call_gemini(prompt, system_prompt, config, _attempt=_attempt + 1)
 
-            if is_daily:
-                tip = "Daily quota resets at midnight Pacific. Try again tomorrow, or set gemini_model='gemini-2.0-flash' / model_provider='anthropic' in config.json."
-                quota_type = "daily quota"
-            elif is_per_minute:
-                tip = "Per-minute retries exhausted. Set gemini_model='gemini-2.0-flash' or model_provider='anthropic' in config.json."
-                quota_type = "per-minute limit"
-            else:
-                tip = "Check your quota at https://ai.dev/rate-limit."
-                quota_type = "quota"
-
-            raise RateLimitError(
-                f"Gemini {quota_type} exceeded.\n{tip}"
-            ) from exc
+            tip = (
+                "Daily quota resets at midnight Pacific. Try gemini_model='gemini-2.0-flash' or model_provider='anthropic'."
+                if is_daily
+                else "Per-minute retries exhausted. Try model_provider='anthropic'."
+            )
+            raise RateLimitError(f"{summary}\n{tip}") from exc
         raise
     return response.text
 
