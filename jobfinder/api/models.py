@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class DiscoverCompaniesRequest(BaseModel):
     max_companies: int | None = None
     model_provider: str | None = None  # overrides config
+    seed_companies: list[str] | None = None  # if set, use seed-based discovery instead of resume
 
 
 class RoleFiltersRequest(BaseModel):

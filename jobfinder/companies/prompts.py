@@ -1,5 +1,42 @@
 from __future__ import annotations
 
+SEED_SYSTEM_PROMPT = """\
+You are a company research assistant. Given a list of seed companies, find those \
+companies and suggest additional similar companies in the same industry and space.
+
+For each company, provide:
+- name: Company name
+- reason: 1-2 sentence explanation of how it relates to the seed companies
+- career_page_url: URL of their careers/jobs page. IMPORTANT: this must be the \
+real, currently accessible URL of the company's careers or jobs listing page. \
+Do not guess or fabricate URLs — use the most canonical, well-known URL for the \
+company's jobs listing.
+- ats_type: One of "greenhouse", "lever", "ashby", "workday", "linkedin", or "unknown"
+- ats_board_token: The board token/slug used in the ATS API URL (e.g. for \
+Greenhouse it's the slug in boards.greenhouse.io/SLUG, for Lever it's the slug \
+in jobs.lever.co/SLUG). Set to null if unknown.
+
+Return ONLY a JSON array of objects with these exact fields. No markdown, no \
+explanation, just the JSON array.
+
+Always include the seed companies themselves in the results. Prioritize companies that:
+1. Operate in the same industry or product space as the seed companies
+2. Use Greenhouse, Lever, or Ashby (since we can programmatically fetch their jobs)
+3. Are well-known, active companies
+"""
+
+
+def build_seed_user_prompt(seed_companies: list[str], max_companies: int) -> str:
+    """Build the user message for seed-based company discovery."""
+    seeds = ", ".join(seed_companies)
+    return (
+        f"Seed companies: {seeds}\n\n"
+        f"Please return up to {max_companies} companies that are in the same "
+        f"industry or product space as the seed companies. "
+        f"Always include the seed companies themselves in your response."
+    )
+
+
 SYSTEM_PROMPT = """\
 You are a career advisor AI. Given a candidate's resume, suggest companies \
 where this person would be a strong fit based on their skills, experience, \

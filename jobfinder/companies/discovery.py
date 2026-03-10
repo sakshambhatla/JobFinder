@@ -5,7 +5,12 @@ import os
 import re
 from datetime import datetime, timezone
 
-from jobfinder.companies.prompts import SYSTEM_PROMPT, build_user_prompt
+from jobfinder.companies.prompts import (
+    SEED_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_seed_user_prompt,
+    build_user_prompt,
+)
 from jobfinder.config import AppConfig
 from jobfinder.storage.schemas import DiscoveredCompany
 from jobfinder.utils.http import head_ok
@@ -14,12 +19,14 @@ from jobfinder.utils.http import head_ok
 def discover_companies(
     resumes: list[dict],
     config: AppConfig,
+    *,
+    seed_companies: list[str] | None = None,
 ) -> list[DiscoveredCompany]:
     """Discover companies using the configured model provider."""
     if config.model_provider == "gemini":
-        raw_text = _call_gemini(resumes, config)
+        raw_text = _call_gemini(resumes, config, seed_companies=seed_companies)
     else:
-        raw_text = _call_anthropic(resumes, config)
+        raw_text = _call_anthropic(resumes, config, seed_companies=seed_companies)
 
     companies = _parse_response(raw_text)
     _validate_companies(companies, timeout=config.request_timeout)
@@ -31,21 +38,31 @@ def discover_companies(
     return companies
 
 
-def _call_anthropic(resumes: list[dict], config: AppConfig) -> str:
+def _call_anthropic(
+    resumes: list[dict],
+    config: AppConfig,
+    *,
+    seed_companies: list[str] | None = None,
+) -> str:
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
 
     import anthropic
 
     client = anthropic.Anthropic()
-    user_prompt = build_user_prompt(resumes, config.max_companies)
+    if seed_companies:
+        system = SEED_SYSTEM_PROMPT
+        user_prompt = build_seed_user_prompt(seed_companies, config.max_companies)
+    else:
+        system = SYSTEM_PROMPT
+        user_prompt = build_user_prompt(resumes, config.max_companies)
 
     print()  # blank line before stream
     chunks: list[str] = []
     with client.messages.stream(
         model=config.anthropic_model,
         max_tokens=4096,
-        system=SYSTEM_PROMPT,
+        system=system,
         messages=[{"role": "user", "content": user_prompt}],
     ) as stream:
         for text in stream.text_stream:
@@ -55,7 +72,13 @@ def _call_anthropic(resumes: list[dict], config: AppConfig) -> str:
     return "".join(chunks)
 
 
-def _call_gemini(resumes: list[dict], config: AppConfig, *, _attempt: int = 0) -> str:
+def _call_gemini(
+    resumes: list[dict],
+    config: AppConfig,
+    *,
+    seed_companies: list[str] | None = None,
+    _attempt: int = 0,
+) -> str:
     import time
 
     from jobfinder.utils.throttle import get_limiter
@@ -68,7 +91,12 @@ def _call_gemini(resumes: list[dict], config: AppConfig, *, _attempt: int = 0) -
     from jobfinder.utils.display import console
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    user_prompt = build_user_prompt(resumes, config.max_companies)
+    if seed_companies:
+        system = SEED_SYSTEM_PROMPT
+        user_prompt = build_seed_user_prompt(seed_companies, config.max_companies)
+    else:
+        system = SYSTEM_PROMPT
+        user_prompt = build_user_prompt(resumes, config.max_companies)
 
     print()  # blank line before stream
     chunks: list[str] = []
@@ -77,7 +105,7 @@ def _call_gemini(resumes: list[dict], config: AppConfig, *, _attempt: int = 0) -
             model=config.gemini_model,
             contents=user_prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             ),
         ):
@@ -96,7 +124,7 @@ def _call_gemini(resumes: list[dict], config: AppConfig, *, _attempt: int = 0) -
                     f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
                 )
                 time.sleep(retry_wait)
-                return _call_gemini(resumes, config, _attempt=_attempt + 1)
+                return _call_gemini(resumes, config, seed_companies=seed_companies, _attempt=_attempt + 1)
 
             tip = (
                 "Daily quota resets at midnight Pacific. Try gemini_model='gemini-2.0-flash' or model_provider='anthropic'."

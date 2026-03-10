@@ -71,6 +71,7 @@ export async function getResume(): Promise<{ resumes: ParsedResume[] }> {
 export interface DiscoverCompaniesParams {
   max_companies?: number;
   model_provider?: string;
+  seed_companies?: string[];
 }
 
 export async function discoverCompanies(

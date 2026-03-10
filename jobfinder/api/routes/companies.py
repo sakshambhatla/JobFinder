@@ -35,16 +35,22 @@ async def discover_companies_endpoint(
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    resumes = store.read("resumes.json")
-    if not resumes:
-        raise HTTPException(
-            status_code=400,
-            detail="No resume found. Upload a resume first.",
-        )
+    seed_companies = req.seed_companies or None
+    resumes: list[dict] = []
+
+    if not seed_companies:
+        resumes = store.read("resumes.json") or []
+        if not resumes:
+            raise HTTPException(
+                status_code=400,
+                detail="No resume found. Upload a resume first.",
+            )
 
     # Run blocking LLM call in a thread pool
     try:
-        companies = await asyncio.to_thread(discover_companies, resumes, config)
+        companies = await asyncio.to_thread(
+            discover_companies, resumes, config, seed_companies=seed_companies
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Company discovery failed: {exc}") from exc
 

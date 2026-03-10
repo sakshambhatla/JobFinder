@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+KNOWN_ATS_TYPES = {"greenhouse", "lever", "ashby", "workday", "linkedin", "unknown"}
 
 
 class ParsedResume(BaseModel):
@@ -21,12 +23,17 @@ class DiscoveredCompany(BaseModel):
     name: str
     reason: str
     career_page_url: str
-    ats_type: Literal[
-        "greenhouse", "lever", "ashby", "workday", "linkedin", "unknown"
-    ] = "unknown"
+    ats_type: str = "unknown"
     ats_board_token: str | None = None
     discovered_at: str = ""
     roles_fetched: bool = False
+
+    @field_validator("ats_type", mode="before")
+    @classmethod
+    def normalize_ats_type(cls, v: object) -> str:
+        if isinstance(v, str) and v.lower() in KNOWN_ATS_TYPES:
+            return v.lower()
+        return "unknown"
 
 
 class DiscoveredRole(BaseModel):

@@ -86,18 +86,30 @@ def resume(ctx: click.Context, resume_dir: str | None) -> None:
     default=False,
     help="Re-discover even if companies.json exists",
 )
+@click.option(
+    "--seed",
+    "seed_companies",
+    type=str,
+    multiple=True,
+    help="Seed company name for similarity-based discovery (repeatable). When set, resume is not used.",
+)
 @click.pass_context
 def discover_companies(
-    ctx: click.Context, max_companies: int | None, refresh: bool
+    ctx: click.Context,
+    max_companies: int | None,
+    refresh: bool,
+    seed_companies: tuple[str, ...],
 ) -> None:
-    """Use Claude to discover relevant companies based on your resume."""
+    """Use Claude to discover relevant companies based on your resume or seed companies."""
     from jobfinder.companies.discovery import discover_companies as _discover
 
     config = load_config(ctx.obj["config_path"], max_companies=max_companies)
     store = StorageManager(config.data_dir)
 
-    # Check prerequisites
-    if not store.exists("resumes.json"):
+    seeds: list[str] = list(seed_companies)
+
+    # Check prerequisites — resume only required for auto-discover mode
+    if not seeds and not store.exists("resumes.json"):
         display_error(
             "No resumes found. Run 'jobfinder resume' first to parse your resumes."
         )
@@ -115,25 +127,34 @@ def discover_companies(
 
     require_api_key(config.model_provider)
 
-    resumes = store.read("resumes.json")
-    if not resumes:
-        display_error("resumes.json is empty. Re-run 'jobfinder resume'.")
-        raise SystemExit(1)
+    resumes: list[dict] = []
+    if not seeds:
+        resumes = store.read("resumes.json") or []
+        if not resumes:
+            display_error("resumes.json is empty. Re-run 'jobfinder resume'.")
+            raise SystemExit(1)
 
     provider_label = config.model_provider.capitalize()
-    console.print(
-        f"Asking {provider_label} to suggest up to [bold]{config.max_companies}[/bold] companies "
-        f"(streaming response below)..."
-    )
+    if seeds:
+        seeds_label = ", ".join(seeds)
+        console.print(
+            f"Asking {provider_label} to find up to [bold]{config.max_companies}[/bold] companies "
+            f"similar to [bold]{seeds_label}[/bold] (streaming response below)..."
+        )
+    else:
+        console.print(
+            f"Asking {provider_label} to suggest up to [bold]{config.max_companies}[/bold] companies "
+            f"(streaming response below)..."
+        )
 
     try:
-        companies = _discover(resumes, config)
+        companies = _discover(resumes, config, seed_companies=seeds or None)
     except Exception as exc:
         display_error(f"Company discovery failed: {exc}")
         raise SystemExit(1)
 
-    # Compute a hash of resume content for cache invalidation
-    resume_text = "".join(r.get("full_text", "") for r in resumes)
+    # Compute a hash of resume content (or seed list) for cache metadata
+    resume_text = "".join(r.get("full_text", "") for r in resumes) if resumes else ",".join(seeds)
     resume_hash = hashlib.sha256(resume_text.encode()).hexdigest()[:16]
 
     # Merge with existing companies if configured

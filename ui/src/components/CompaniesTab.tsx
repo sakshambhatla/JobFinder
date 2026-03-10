@@ -23,6 +23,13 @@ const glassTableStyle = {
   borderColor: "rgba(255,255,255,0.15)",
 };
 
+const glassSelectStyle = {
+  background: "rgba(255,255,255,0.10)",
+  backdropFilter: "blur(4px)",
+  WebkitBackdropFilter: "blur(4px)",
+  border: "1px solid rgba(255,255,255,0.20)",
+};
+
 function CompanyTable({ companies }: { companies: DiscoveredCompany[] }) {
   return (
     <div className="rounded-xl border overflow-hidden" style={glassTableStyle}>
@@ -70,10 +77,21 @@ function CompanyTable({ companies }: { companies: DiscoveredCompany[] }) {
   );
 }
 
+type DiscoveryMode = "resume" | "seed";
+
+function parseSeedCompanies(raw: string): string[] {
+  return raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export function CompaniesTab() {
   const qc = useQueryClient();
   const [maxCompanies, setMaxCompanies] = useState<string>("20");
   const [provider, setProvider] = useState<string>("gemini");
+  const [mode, setMode] = useState<DiscoveryMode>("resume");
+  const [seedInput, setSeedInput] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   const { data: cached } = useQuery({
@@ -83,11 +101,14 @@ export function CompaniesTab() {
   });
 
   const discover = useMutation({
-    mutationFn: () =>
-      discoverCompanies({
+    mutationFn: () => {
+      const seeds = mode === "seed" ? parseSeedCompanies(seedInput) : undefined;
+      return discoverCompanies({
         max_companies: maxCompanies ? parseInt(maxCompanies, 10) : undefined,
         model_provider: provider || undefined,
-      }),
+        seed_companies: seeds && seeds.length > 0 ? seeds : undefined,
+      });
+    },
     onSuccess: (data) => {
       qc.setQueryData(["companies"], data);
       setError(null);
@@ -98,12 +119,52 @@ export function CompaniesTab() {
   });
 
   const companies = discover.data?.companies ?? cached?.companies ?? [];
+  const isSeedMode = mode === "seed";
 
   return (
     <div className="space-y-6">
       {/* Config form */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="pt-6 space-y-4">
+          {/* Mode toggle */}
+          <div className="space-y-1.5">
+            <Label className="text-white/75">Discovery Mode</Label>
+            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "rgba(255,255,255,0.20)", width: "fit-content" }}>
+              {(["resume", "seed"] as DiscoveryMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className="px-4 py-1.5 text-sm font-medium transition-colors"
+                  style={{
+                    background: mode === m ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)",
+                    color: mode === m ? "white" : "rgba(255,255,255,0.50)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {m === "resume" ? "From Resume" : "From Seed List"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Seed input (only in seed mode) */}
+          {isSeedMode && (
+            <div className="space-y-1.5">
+              <Label htmlFor="seed-companies" className="text-white/75">
+                Seed Companies <span className="text-white/40 font-normal">(one per line or comma-separated)</span>
+              </Label>
+              <textarea
+                id="seed-companies"
+                rows={4}
+                placeholder={"Zillow\nRedfin\nCompass"}
+                value={seedInput}
+                onChange={(e) => setSeedInput(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 text-sm text-white resize-none outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                style={{ ...glassSelectStyle, minWidth: "280px" }}
+              />
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-4 items-end">
             <div className="space-y-1.5">
               <Label htmlFor="max-companies" className="text-white/75">Max companies</Label>
@@ -124,12 +185,7 @@ export function CompaniesTab() {
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
                 className="flex h-8 w-36 rounded-lg px-3 py-1 text-sm text-white transition-colors outline-none focus-visible:ring-3 focus-visible:ring-white/20 focus-visible:border-white/40"
-                style={{
-                  background: "rgba(255,255,255,0.10)",
-                  backdropFilter: "blur(4px)",
-                  WebkitBackdropFilter: "blur(4px)",
-                  border: "1px solid rgba(255,255,255,0.20)",
-                }}
+                style={glassSelectStyle}
               >
                 <option value="gemini" style={{ background: "#1b4332", color: "white" }}>Gemini</option>
                 <option value="anthropic" style={{ background: "#1b4332", color: "white" }}>Anthropic</option>
@@ -137,7 +193,7 @@ export function CompaniesTab() {
             </div>
             <Button
               onClick={() => discover.mutate()}
-              disabled={discover.isPending}
+              disabled={discover.isPending || (isSeedMode && parseSeedCompanies(seedInput).length === 0)}
               className="self-end"
             >
               {discover.isPending ? (
@@ -156,7 +212,11 @@ export function CompaniesTab() {
       {discover.isPending && (
         <div className="flex flex-col items-center gap-3 py-12 text-white/55">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/40 border-t-white/80" />
-          <p className="text-sm">Analyzing your resume and discovering companies…</p>
+          {isSeedMode ? (
+            <p className="text-sm">Finding companies similar to your seeds…</p>
+          ) : (
+            <p className="text-sm">Analyzing your resume and discovering companies…</p>
+          )}
           <p className="text-xs text-white/40">This may take 20–40 seconds</p>
         </div>
       )}
