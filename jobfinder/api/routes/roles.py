@@ -230,6 +230,254 @@ async def get_roles() -> dict:
     return data
 
 
+@router.get("/roles/fetch-browser/stream")
+async def stream_browser_fetch(company_name: str, request: Request):
+    """Stream real-time browser-agent progress for a flagged company via SSE.
+
+    SSE event types emitted (``event`` field) and their JSON payloads:
+
+    - ``jobs_batch``    — ``{jobs[], total_so_far}``  whenever new jobs are found
+    - ``filter_result`` — ``{filtered[], kept, dropped}``  after LLM filter pipeline
+    - ``done``          — ``{metrics}``  on clean completion
+    - ``killed``        — ``{reason, partial_jobs, metrics}``  on time-limit or kill
+    - ``error``         — ``{error_type, message, can_resume}``  on failure
+
+    Connect with the browser's ``EventSource`` API.  Use ``DELETE
+    /roles/fetch-browser/{company_name}`` to kill a running agent.
+    """
+    import asyncio
+    import json
+    from datetime import datetime, timezone
+
+    from sse_starlette.sse import EventSourceResponse
+
+    from jobfinder.roles.ats.browser_session import AgentMetrics, AgentSession
+    from jobfinder.roles.ats.career_page import _run_browser_agent_streaming
+
+    config = load_config()
+    store = StorageManager(config.data_dir)
+
+    # ── Registry lookup ───────────────────────────────────────────────────────
+
+    registry: list[dict] = request.app.state.registry
+    reg_map = {e["name"].lower(): e for e in registry}
+    entry = reg_map.get(company_name.lower())
+    if entry is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Company '{company_name}' not found in registry.",
+        )
+    career_page_url = entry.get("career_page_url") or ""
+    if not career_page_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No career page URL on file for '{entry['name']}'.",
+        )
+
+    # ── Session setup ─────────────────────────────────────────────────────────
+
+    session = AgentSession(
+        company_name=entry["name"],
+        event_queue=asyncio.Queue(maxsize=200),
+        kill_event=asyncio.Event(),
+        metrics=AgentMetrics(company_name=entry["name"]),
+    )
+    request.app.state.running_agents[entry["name"]] = session
+
+    # ── Local helpers (closures over entry / config / store / session) ────────
+
+    def _to_roles(jobs: list[dict]) -> list[DiscoveredRole]:
+        """Convert raw agent job dicts to DiscoveredRole objects."""
+        fetched_at = datetime.now(timezone.utc).isoformat()
+        result: list[DiscoveredRole] = []
+        for j in jobs:
+            try:
+                result.append(
+                    DiscoveredRole(
+                        company_name=entry["name"],
+                        title=j.get("title", ""),
+                        location=j.get("location") or "Unknown",
+                        url=j.get("url") or "",
+                        department=j.get("department") or None,
+                        ats_type="career_page",
+                        fetched_at=fetched_at,
+                    )
+                )
+            except Exception:
+                pass
+        return result
+
+    def _merge_to_file(role_dicts: list[dict]) -> None:
+        """Upsert *role_dicts* into roles.json (dedup by URL, sort by score)."""
+        existing_data = store.read("roles.json") or {}
+        existing = [
+            DiscoveredRole.model_validate(r) for r in existing_data.get("roles", [])
+        ]
+        seen: dict[str, DiscoveredRole] = {r.url: r for r in existing}
+        for d in role_dicts:
+            try:
+                r = DiscoveredRole.model_validate(d)
+                if r.url:
+                    seen[r.url] = r
+            except Exception:
+                pass
+        final = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+        store.write("roles.json", {**existing_data, "roles": [r.model_dump() for r in final]})
+
+    async def _filter_and_post(jobs: list[dict]) -> None:
+        """Run LLM filter on *jobs* and post a filter_result event to the queue."""
+        if not jobs or not config.role_filters:
+            return
+        from jobfinder.roles.filters import filter_roles
+
+        roles_objs = _to_roles(jobs)
+        if not roles_objs:
+            return
+        try:
+            filtered = await asyncio.to_thread(
+                filter_roles, roles_objs, config.role_filters, config
+            )
+        except Exception:
+            return
+        if filtered:
+            try:
+                await session.event_queue.put(
+                    {
+                        "type": "filter_result",
+                        "filtered": [r.model_dump() for r in filtered],
+                        "kept": len(filtered),
+                        "dropped": len(jobs) - len(filtered),
+                    }
+                )
+            except asyncio.QueueFull:
+                pass
+
+    # ── Start agent background task ───────────────────────────────────────────
+
+    session.task = asyncio.create_task(
+        _run_browser_agent_streaming(entry["name"], career_page_url, config, session, store)
+    )
+
+    # ── SSE generator ─────────────────────────────────────────────────────────
+
+    async def event_generator():
+        pending_filter_tasks: list[asyncio.Task] = []
+        try:
+            while True:
+                # Kill agent when client disconnects
+                if await request.is_disconnected():
+                    session.kill_event.set()
+                    if session.task and not session.task.done():
+                        session.task.cancel()
+                    break
+
+                # Drain the event queue
+                try:
+                    event = session.event_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # Exit if agent finished and nothing left to stream
+                    if (
+                        session.task is not None
+                        and session.task.done()
+                        and session.event_queue.empty()
+                    ):
+                        break
+                    await asyncio.sleep(0.3)
+                    continue
+
+                event_type = event.get("type", "")
+
+                # Kick off async filter for each batch (when filters configured)
+                if event_type == "jobs_batch" and config.role_filters:
+                    t = asyncio.create_task(_filter_and_post(event["jobs"]))
+                    pending_filter_tasks.append(t)
+
+                # Merge filtered roles into roles.json on each filter_result
+                if event_type == "filter_result":
+                    try:
+                        _merge_to_file(event.get("filtered", []))
+                    except Exception:
+                        pass
+                    # Prune completed tasks from the tracking list
+                    pending_filter_tasks = [t for t in pending_filter_tasks if not t.done()]
+
+                # Forward the event to the client
+                yield {"event": event_type, "data": json.dumps(event)}
+
+                # Terminal event: flush filter pipeline before ending the stream
+                if event_type in ("done", "killed", "error"):
+                    if pending_filter_tasks:
+                        await asyncio.gather(*pending_filter_tasks, return_exceptions=True)
+                        # Drain any filter_result events that landed after the terminal
+                        while not session.event_queue.empty():
+                            try:
+                                extra = session.event_queue.get_nowait()
+                                if extra.get("type") == "filter_result":
+                                    try:
+                                        _merge_to_file(extra.get("filtered", []))
+                                    except Exception:
+                                        pass
+                                    yield {
+                                        "event": "filter_result",
+                                        "data": json.dumps(extra),
+                                    }
+                            except asyncio.QueueEmpty:
+                                break
+
+                    # No filter configured: merge all collected partial roles at once
+                    if not config.role_filters and session.partial_roles:
+                        all_dicts = [
+                            r.model_dump()
+                            for r in _to_roles(session.partial_roles)
+                            if r.url
+                        ]
+                        try:
+                            _merge_to_file(all_dicts)
+                        except Exception:
+                            pass
+
+                    break
+
+        finally:
+            # Cancel any still-running filter tasks on exit
+            for t in pending_filter_tasks:
+                if not t.done():
+                    t.cancel()
+            request.app.state.running_agents.pop(entry["name"], None)
+
+    return EventSourceResponse(event_generator())
+
+
+@router.delete("/roles/fetch-browser/{company_name}")
+async def kill_browser_fetch(company_name: str, request: Request) -> dict:
+    """Kill a running browser-use agent by company name.
+
+    Returns ``{killed, partial_jobs}`` on success; 404 if no agent is running.
+    """
+    running: dict = request.app.state.running_agents
+
+    # Exact match first, then case-insensitive fallback
+    session = running.get(company_name)
+    if session is None:
+        for key, val in running.items():
+            if key.lower() == company_name.lower():
+                session = val
+                company_name = key
+                break
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No running browser agent for '{company_name}'.",
+        )
+
+    session.kill_event.set()
+    if session.task and not session.task.done():
+        session.task.cancel()
+
+    return {"killed": True, "partial_jobs": len(session.partial_roles)}
+
+
 @router.post("/roles/fetch-browser")
 async def fetch_browser_roles(req: FetchBrowserRolesRequest, request: Request) -> dict:
     """Use a browser-use agent to fetch roles for a single flagged company.

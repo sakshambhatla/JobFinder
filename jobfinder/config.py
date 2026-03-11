@@ -25,7 +25,7 @@ class AppConfig(BaseModel):
     # Model name used when provider = "anthropic"
     anthropic_model: str = "claude-sonnet-4-6"
     # Model name used when provider = "gemini"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash-lite"
     max_companies: int = 15
     # Default refresh behaviour for discover-companies and discover-roles
     refresh: bool = False
@@ -39,6 +39,16 @@ class AppConfig(BaseModel):
     rpm_limit: int = 4
     # Print full raw API error responses alongside formatted summaries.
     debug: bool = False
+
+    # ── Browser agent settings (config.json only, not exposed in the UI) ──────
+    # Hard time wall: agent is cancelled after this many minutes regardless of steps.
+    browser_agent_max_time_minutes: int = 7
+    # Step budget passed to browser-use Agent.run(max_steps=...).
+    browser_agent_max_steps: int = 50
+    # Give up after this many consecutive 429 / rate-limit responses from the career page API.
+    browser_agent_rate_limit_max_retries: int = 5
+    # Initial back-off in seconds; doubles each consecutive rate-limit hit (capped at 120s).
+    browser_agent_rate_limit_initial_wait: int = 5
 
 
 def load_config(config_path: str | None = None, **overrides: object) -> AppConfig:

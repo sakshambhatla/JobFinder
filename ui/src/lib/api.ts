@@ -164,3 +164,70 @@ export async function fetchBrowserRoles(
   });
   return data;
 }
+
+// ─── Browser Agent Streaming (SSE) ────────────────────────────────────────────
+
+export interface BrowserAgentMetrics {
+  company_name: string;
+  steps_taken: number;
+  jobs_collected: number;
+  jobs_announced?: number;
+  rate_limit_hits: number;
+  elapsed_seconds: number;
+  status: string;
+}
+
+/** SSE payload: new batch of jobs found by the agent */
+export interface BrowserAgentJobsBatchEvent {
+  type: "jobs_batch";
+  jobs: DiscoveredRole[];
+  total_so_far: number;
+}
+
+/** SSE payload: LLM filter pipeline processed a batch */
+export interface BrowserAgentFilterResultEvent {
+  type: "filter_result";
+  filtered: DiscoveredRole[];
+  kept: number;
+  dropped: number;
+}
+
+/** SSE payload: clean completion */
+export interface BrowserAgentDoneEvent {
+  type: "done";
+  metrics: BrowserAgentMetrics;
+}
+
+/** SSE payload: agent killed by time limit or user request */
+export interface BrowserAgentKilledEvent {
+  type: "killed";
+  reason: "user_request" | "time_limit";
+  partial_jobs: number;
+  metrics: BrowserAgentMetrics;
+}
+
+/** SSE payload: agent encountered an unrecoverable error */
+export interface BrowserAgentErrorEvent {
+  type: "error";
+  error_type: string;
+  message: string;
+  can_resume: boolean;
+}
+
+/**
+ * Build the SSE URL for a company's browser-agent stream.
+ * Pass this to `new EventSource(url)` — do NOT use axios for SSE.
+ */
+export function browserAgentStreamUrl(company_name: string): string {
+  return `/api/roles/fetch-browser/stream?company_name=${encodeURIComponent(company_name)}`;
+}
+
+/** Send a kill signal to a running browser agent. */
+export async function killBrowserAgent(
+  company_name: string
+): Promise<{ killed: boolean; partial_jobs: number }> {
+  const { data } = await api.delete<{ killed: boolean; partial_jobs: number }>(
+    `/roles/fetch-browser/${encodeURIComponent(company_name)}`
+  );
+  return data;
+}

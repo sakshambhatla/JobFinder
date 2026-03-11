@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
     config = load_config()
     store = StorageManager(config.data_dir)
     app.state.registry = load_or_bootstrap_registry(store)
+    # Keyed by company name; holds AgentSession objects for running browser agents
+    app.state.running_agents: dict[str, object] = {}
     yield
 
 

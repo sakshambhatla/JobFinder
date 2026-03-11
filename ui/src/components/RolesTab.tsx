@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useReactTable,
@@ -9,13 +9,16 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import {
+  browserAgentStreamUrl,
   discoverRoles,
-  fetchBrowserRoles,
+  killBrowserAgent,
   getRoles,
   getRolesCheckpoint,
   getCompanyRegistry,
+  type BrowserAgentMetrics,
   type DiscoveredRole,
   type FlaggedCompany,
+  type RolesResponse,
   type CompanyRegistryEntry,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -145,48 +148,164 @@ function RolesTable({ roles }: { roles: DiscoveredRole[] }) {
   );
 }
 
-type BrowserFetchState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "success"; count: number }
-  | { status: "error"; message: string };
+// ─── Browser-agent streaming state ───────────────────────────────────────────
+
+type AgentStatus = "idle" | "running" | "done" | "killed" | "error";
+
+interface CompanyAgentState {
+  status: AgentStatus;
+  jobsCollected: number;
+  partialJobs?: number;
+  metrics?: BrowserAgentMetrics;
+  errorMessage?: string;
+}
+
+/** Merge newly-arrived roles into an existing RolesResponse (dedup by URL). */
+function mergeRolesIntoResponse(
+  prev: RolesResponse | undefined,
+  newRoles: DiscoveredRole[]
+): RolesResponse {
+  const empty: RolesResponse = {
+    fetched_at: new Date().toISOString(),
+    total_roles: newRoles.length,
+    roles_after_filter: newRoles.length,
+    companies_fetched: 0,
+    companies_flagged: 0,
+    flagged_companies: [],
+    roles: newRoles,
+  };
+  if (!prev) return empty;
+  const existingUrls = new Set(prev.roles.map((r) => r.url));
+  const trulyNew = newRoles.filter((r) => !existingUrls.has(r.url));
+  if (trulyNew.length === 0) return prev;
+  return {
+    ...prev,
+    roles: [...prev.roles, ...trulyNew].sort(
+      (a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0)
+    ),
+    total_roles: prev.total_roles + trulyNew.length,
+    roles_after_filter: prev.roles_after_filter + trulyNew.length,
+  };
+}
 
 function FlaggedBox({
   flagged,
-  onBrowserFetchSuccess,
+  onDone,
 }: {
   flagged: FlaggedCompany[];
-  onBrowserFetchSuccess: () => void;
+  onDone: () => void;
 }) {
-  // Per-company fetch state; keyed by company name
-  const [fetchStates, setFetchStates] = useState<Record<string, BrowserFetchState>>({});
-  // Only one agent may run at a time
-  const anyLoading = Object.values(fetchStates).some((s) => s.status === "loading");
+  const qc = useQueryClient();
+  const [agentStates, setAgentStates] = useState<Record<string, CompanyAgentState>>({});
+  // One EventSource ref per company; cleanup happens inside event handlers
+  const esRefs = useRef<Record<string, EventSource>>({});
 
-  async function handleFetch(company: FlaggedCompany) {
-    setFetchStates((prev) => ({ ...prev, [company.name]: { status: "loading" } }));
+  function updateState(
+    name: string,
+    updater: (prev: CompanyAgentState) => CompanyAgentState
+  ) {
+    setAgentStates((all) => ({
+      ...all,
+      [name]: updater(all[name] ?? { status: "idle", jobsCollected: 0 }),
+    }));
+  }
+
+  function startAgent(company: FlaggedCompany) {
+    if (esRefs.current[company.name]) return; // already running
+    updateState(company.name, () => ({ status: "running", jobsCollected: 0 }));
+
+    const es = new EventSource(browserAgentStreamUrl(company.name));
+    esRefs.current[company.name] = es;
+
+    es.addEventListener("jobs_batch", (e) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      updateState(company.name, (prev) => ({
+        ...prev,
+        jobsCollected: data.total_so_far ?? prev.jobsCollected,
+      }));
+    });
+
+    es.addEventListener("filter_result", (e) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      if (data.filtered?.length) {
+        qc.setQueryData(["roles"], (prev: RolesResponse | undefined) =>
+          mergeRolesIntoResponse(prev, data.filtered)
+        );
+      }
+    });
+
+    es.addEventListener("done", (e) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      updateState(company.name, (prev) => ({
+        status: "done",
+        jobsCollected: data.metrics?.jobs_collected ?? prev.jobsCollected,
+        metrics: data.metrics,
+      }));
+      es.close();
+      delete esRefs.current[company.name];
+      // Refresh so any unfiltered partial roles saved to roles.json appear in the table
+      onDone();
+    });
+
+    es.addEventListener("killed", (e) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      updateState(company.name, (prev) => ({
+        status: "killed",
+        jobsCollected: prev.jobsCollected,
+        partialJobs: data.partial_jobs,
+        metrics: data.metrics,
+      }));
+      es.close();
+      delete esRefs.current[company.name];
+    });
+
+    // "error" covers both our custom SSE error events and connection failures.
+    // Custom events have .data; connection failures do not.
+    es.addEventListener("error", (e) => {
+      const msgEvent = e as MessageEvent;
+      if (msgEvent.data) {
+        const data = JSON.parse(msgEvent.data);
+        updateState(company.name, (prev) => ({
+          status: "error",
+          jobsCollected: prev.jobsCollected,
+          errorMessage: data.message ?? "Agent error",
+        }));
+      } else {
+        updateState(company.name, (prev) => ({
+          status: "error",
+          jobsCollected: prev.jobsCollected,
+          errorMessage: "Connection to agent lost.",
+        }));
+      }
+      es.close();
+      delete esRefs.current[company.name];
+    });
+  }
+
+  async function killAgent(company: FlaggedCompany) {
+    const es = esRefs.current[company.name];
+    if (es) {
+      es.close();
+      delete esRefs.current[company.name];
+    }
+    // Optimistically mark as killed; the DELETE call signals the server
+    updateState(company.name, (prev) => ({
+      status: "killed",
+      jobsCollected: prev.jobsCollected,
+      partialJobs: prev.jobsCollected,
+    }));
     try {
-      const result = await fetchBrowserRoles(company.name);
-      setFetchStates((prev) => ({
-        ...prev,
-        [company.name]: { status: "success", count: result.roles_found },
-      }));
-      // Refresh the roles table so newly found roles appear
-      onBrowserFetchSuccess();
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } }; message: string };
-      const msg = axiosErr.response?.data?.detail ?? axiosErr.message;
-      setFetchStates((prev) => ({
-        ...prev,
-        [company.name]: { status: "error", message: msg },
-      }));
+      await killBrowserAgent(company.name);
+    } catch {
+      // best-effort — agent may have already finished
     }
   }
 
   if (flagged.length === 0) return null;
+
   return (
     <div
-      className="rounded-xl border p-4 space-y-3"
+      className="rounded-xl border p-4 space-y-4"
       style={{
         background: "rgba(234,179,8,0.10)",
         backdropFilter: "blur(8px)",
@@ -197,58 +316,114 @@ function FlaggedBox({
       <p className="text-sm font-medium text-yellow-200">
         ⚠️ {flagged.length} {flagged.length === 1 ? "company" : "companies"} need manual check
       </p>
-      <div className="space-y-2">
+
+      <div className="space-y-3">
         {flagged.map((f) => {
-          const state: BrowserFetchState = fetchStates[f.name] ?? { status: "idle" };
-          const isLoading = state.status === "loading";
+          const state: CompanyAgentState = agentStates[f.name] ?? {
+            status: "idle",
+            jobsCollected: 0,
+          };
+          const isRunning = state.status === "running";
+
           return (
-            <div key={f.name} className="flex flex-wrap items-center gap-2 text-xs text-yellow-300">
-              <span className="font-medium">{f.name}</span>
-              <span className="text-yellow-400/70">({f.ats_type})</span>
-              {f.career_page_url && (
-                <a
-                  href={f.career_page_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-2 text-yellow-300/80 hover:text-yellow-200"
-                >
-                  Open ↗
-                </a>
-              )}
-
-              {/* Browser agent fetch button */}
-              <button
-                onClick={() => handleFetch(f)}
-                disabled={anyLoading || state.status === "success"}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium
-                           transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  background: "rgba(234,179,8,0.20)",
-                  border: "1px solid rgba(234,179,8,0.40)",
-                  color: "rgba(253,224,71,0.90)",
-                }}
-              >
-                {isLoading ? (
-                  <>
-                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    Fetching…
-                  </>
-                ) : (
-                  "Fetch via Browser Agent"
+            <div key={f.name} className="space-y-1.5">
+              {/* Company header row */}
+              <div className="flex flex-wrap items-center gap-2 text-xs text-yellow-300">
+                <span className="font-semibold">{f.name}</span>
+                <span className="text-yellow-400/60">({f.ats_type})</span>
+                {f.career_page_url && (
+                  <a
+                    href={f.career_page_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2 text-yellow-300/70 hover:text-yellow-200"
+                  >
+                    Open ↗
+                  </a>
                 )}
-              </button>
+              </div>
 
-              {/* Inline result / error */}
-              {state.status === "success" && (
-                <span className="text-emerald-400 font-medium">
-                  ✓ {state.count} role{state.count !== 1 ? "s" : ""} found
-                </span>
-              )}
-              {state.status === "error" && (
-                <span className="text-red-400" title={state.message}>
-                  ✗ {state.message.length > 60 ? state.message.slice(0, 60) + "…" : state.message}
-                </span>
-              )}
+              {/* Status / action row */}
+              <div className="flex flex-wrap items-center gap-2 text-xs pl-0">
+                {state.status === "idle" && (
+                  <button
+                    onClick={() => startAgent(f)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
+                    style={{
+                      background: "rgba(234,179,8,0.20)",
+                      border: "1px solid rgba(234,179,8,0.40)",
+                      color: "rgba(253,224,71,0.90)",
+                    }}
+                  >
+                    Fetch via Browser Agent
+                  </button>
+                )}
+
+                {isRunning && (
+                  <>
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-yellow-400/60 border-t-yellow-300 shrink-0" />
+                    <span className="text-yellow-300/80">
+                      {state.jobsCollected > 0
+                        ? `${state.jobsCollected} jobs found…`
+                        : "Starting agent…"}
+                    </span>
+                    <button
+                      onClick={() => killAgent(f)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors"
+                      style={{
+                        background: "rgba(239,68,68,0.18)",
+                        border: "1px solid rgba(239,68,68,0.35)",
+                        color: "rgba(252,165,165,0.90)",
+                      }}
+                    >
+                      ■ Kill Agent
+                    </button>
+                  </>
+                )}
+
+                {state.status === "done" && (
+                  <span className="text-emerald-400 font-medium">
+                    ✓ {state.jobsCollected} job{state.jobsCollected !== 1 ? "s" : ""} found
+                    {state.metrics && (
+                      <span className="text-emerald-400/60 font-normal ml-1">
+                        ({Math.round(state.metrics.elapsed_seconds)}s)
+                      </span>
+                    )}
+                  </span>
+                )}
+
+                {state.status === "killed" && (
+                  <span className="text-yellow-500/90">
+                    ✋ Stopped —{" "}
+                    {(state.partialJobs ?? state.jobsCollected) > 0
+                      ? `${state.partialJobs ?? state.jobsCollected} partial jobs saved`
+                      : "no jobs collected"}
+                    {state.status === "killed" && (
+                      <button
+                        onClick={() => startAgent(f)}
+                        className="ml-2 underline underline-offset-2 text-yellow-300/70 hover:text-yellow-200"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </span>
+                )}
+
+                {state.status === "error" && (
+                  <span className="text-red-400" title={state.errorMessage}>
+                    ✗{" "}
+                    {(state.errorMessage ?? "Unknown error").length > 80
+                      ? (state.errorMessage ?? "Unknown error").slice(0, 80) + "…"
+                      : (state.errorMessage ?? "Unknown error")}
+                    <button
+                      onClick={() => startAgent(f)}
+                      className="ml-2 underline underline-offset-2 text-red-300/70 hover:text-red-200"
+                    >
+                      Retry
+                    </button>
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}
@@ -615,7 +790,7 @@ export function RolesTab() {
           )}
           <FlaggedBox
             flagged={flagged}
-            onBrowserFetchSuccess={() => qc.invalidateQueries({ queryKey: ["roles"] })}
+            onDone={() => qc.invalidateQueries({ queryKey: ["roles"] })}
           />
         </div>
       )}

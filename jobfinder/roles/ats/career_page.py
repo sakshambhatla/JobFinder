@@ -192,7 +192,7 @@ def _fetch_html_playwright(url: str, timeout: int) -> str | None:
         return None
 
 
-# ── Browser-use agent path ───────────────────────────────────────────────────
+# ── Browser-use LLM builder ──────────────────────────────────────────────────
 
 
 def _build_browser_llm(config: AppConfig):
@@ -215,6 +215,247 @@ def _build_browser_llm(config: AppConfig):
         return ChatAnthropic(model=config.anthropic_model)
 
 
+# ── Task prompt builder ──────────────────────────────────────────────────────
+
+
+def _build_task_prompt(
+    company_name: str,
+    url: str,
+    profile: dict | None,
+    config: AppConfig,
+) -> str:
+    """Build the browser-use agent task string.
+
+    When a known API profile exists for the domain, the endpoint is injected so
+    the agent skips re-discovery and goes straight to extraction.
+    """
+    api_hint = ""
+    if profile and profile.get("endpoints"):
+        ep = profile["endpoints"][0]
+        rpm = ep.get("rate_limit_rpm_observed", 3)
+        method = ep.get("method", "GET")
+        path = ep.get("path", "")
+        api_hint = (
+            f"KNOWN API: {method} {path} (observed rate limit: ~{rpm} req/min). "
+            f"Use this endpoint directly — skip manual page navigation. "
+        )
+
+    rate_hint = (
+        f"If you encounter rate limiting (HTTP 429 or messages like 'Please rel...'), "
+        f"wait {config.browser_agent_rate_limit_initial_wait}s then double the wait "
+        f"each consecutive failure. Give up after "
+        f"{config.browser_agent_rate_limit_max_retries} consecutive failures. "
+    )
+
+    return (
+        f"Go to {url}. This is the careers/jobs page for {company_name}. "
+        f"{api_hint}"
+        f"Extract ALL job listings from this page. Navigate through pagination "
+        f"(Next buttons, page numbers, Load More buttons), apply any relevant "
+        f"category or location filters if needed, and keep going until you have "
+        f"seen every available role. "
+        f"{rate_hint}"
+        f"Return ONLY a JSON array where each item has exactly these keys: "
+        f"title (string), location (string or 'Remote'), "
+        f"url (full absolute URL to the job posting, or empty string if none), "
+        f"department (string or null). "
+        f"Do not include any markdown fences or explanations — just the raw JSON array."
+    )
+
+
+# ── Streaming LLM wrapper ────────────────────────────────────────────────────
+
+
+class _StreamingLLMWrapper:
+    """Wraps a browser-use LLM to stream intermediate job batches.
+
+    Every time the underlying LLM responds, we scan the text for a JSON array
+    that looks like a job listing batch (objects with ``title`` keys).  Any new
+    jobs found (deduped by URL) are posted to the ``AgentSession.event_queue``
+    immediately so the SSE generator can stream them to the UI before the full
+    agent run completes.
+    """
+
+    def __init__(self, base_llm, session) -> None:  # session: AgentSession
+        self._llm = base_llm
+        self._session = session
+        self._seen_urls: set[str] = set()
+
+    def __getattr__(self, name: str):
+        return getattr(self._llm, name)
+
+    async def ainvoke(self, messages, **kwargs):
+        response = await self._llm.ainvoke(messages, **kwargs)
+        self._maybe_emit_jobs(str(getattr(response, "content", "")))
+        return response
+
+    # Some browser-use code paths call invoke() synchronously
+    def invoke(self, messages, **kwargs):
+        response = self._llm.invoke(messages, **kwargs)
+        self._maybe_emit_jobs(str(getattr(response, "content", "")))
+        return response
+
+    def _maybe_emit_jobs(self, text: str) -> None:
+        """Extract jobs from *text* and post new ones to the session event queue."""
+        raw_jobs = _try_extract_job_dicts(text)
+        new_jobs = [j for j in raw_jobs if j.get("url") not in self._seen_urls]
+        if not new_jobs:
+            return
+        self._seen_urls.update(j.get("url", "") for j in new_jobs)
+        self._session.partial_roles.extend(new_jobs)
+        self._session.metrics.jobs_collected = len(self._session.partial_roles)
+        try:
+            self._session.event_queue.put_nowait({
+                "type": "jobs_batch",
+                "jobs": new_jobs,
+                "total_so_far": len(self._session.partial_roles),
+            })
+        except Exception:
+            pass  # queue full — drop; SSE generator drains asynchronously
+
+
+# ── Streaming agent runner (API path) ────────────────────────────────────────
+
+
+async def _run_with_kill_check(agent, session, max_steps: int):
+    """Run ``agent.run(max_steps)`` but cancel if ``session.kill_event`` fires."""
+    import asyncio
+
+    run_task = asyncio.create_task(agent.run(max_steps=max_steps))
+    while not run_task.done():
+        if session.kill_event.is_set():
+            run_task.cancel()
+            break
+        await asyncio.sleep(0.5)
+    try:
+        return await run_task
+    except asyncio.CancelledError:
+        raise
+
+
+async def _run_browser_agent_streaming(
+    company_name: str,
+    career_page_url: str,
+    config: AppConfig,
+    session,  # AgentSession
+    store,    # StorageManager
+) -> None:
+    """Run the browser-use agent with live streaming to *session*.
+
+    Posts SSE events to ``session.event_queue``:
+
+    - ``jobs_batch``  — whenever new jobs are found (via LLM wrapper interception)
+    - ``done``        — on clean completion
+    - ``killed``      — on time-limit or user kill
+    - ``error``       — on unexpected exception
+
+    This is the **API path** called from the SSE route.  The CLI still uses the
+    synchronous :func:`fetch_career_page_roles_browser` wrapper below.
+    """
+    import asyncio
+    from jobfinder.utils.display import console
+    from jobfinder.storage.api_profiles import load_profile
+
+    known_profile = load_profile(career_page_url, store)
+    base_llm = _build_browser_llm(config)
+    wrapped_llm = _StreamingLLMWrapper(base_llm, session)
+    task_prompt = _build_task_prompt(company_name, career_page_url, known_profile, config)
+
+    try:
+        from browser_use import Agent  # type: ignore
+    except ImportError:
+        await session.event_queue.put({
+            "type": "error",
+            "error_type": "not_installed",
+            "message": (
+                "browser-use not installed. "
+                "Run: pip install browser-use langchain-anthropic langchain-google-genai"
+            ),
+            "can_resume": False,
+        })
+        return
+
+    agent = Agent(task=task_prompt, llm=wrapped_llm)
+    max_seconds = config.browser_agent_max_time_minutes * 60
+
+    console.print(
+        f"  Starting streaming browser agent for [bold]{company_name}[/bold] → {career_page_url}"
+    )
+
+    try:
+        result = await asyncio.wait_for(
+            _run_with_kill_check(agent, session, config.browser_agent_max_steps),
+            timeout=max_seconds,
+        )
+
+        # Parse final result — catches anything the LLM wrapper may have missed
+        final_raw = (result.final_result() or "") if result else ""
+        final_dicts = _try_extract_job_dicts(final_raw)
+        existing_urls = {r.get("url", "") for r in session.partial_roles}
+        new_final = [j for j in final_dicts if j.get("url") not in existing_urls]
+        if new_final:
+            session.partial_roles.extend(new_final)
+            session.metrics.jobs_collected = len(session.partial_roles)
+            await session.event_queue.put({
+                "type": "jobs_batch",
+                "jobs": new_final,
+                "total_so_far": len(session.partial_roles),
+            })
+
+        # Persist API profile if the agent embedded one
+        _maybe_save_api_profile(final_raw, career_page_url, company_name, store)
+
+        session.metrics.status = "done"
+        console.print(
+            f"  [green]Browser agent completed:[/green] "
+            f"{session.metrics.jobs_collected} roles for {company_name}"
+        )
+        await session.event_queue.put({
+            "type": "done",
+            "metrics": session.metrics.to_dict(),
+        })
+
+    except asyncio.TimeoutError:
+        session.metrics.status = "killed"
+        console.print(
+            f"  [yellow]Browser agent time limit ({config.browser_agent_max_time_minutes} min) "
+            f"reached for {company_name}[/yellow]"
+        )
+        await session.event_queue.put({
+            "type": "killed",
+            "reason": "time_limit",
+            "partial_jobs": len(session.partial_roles),
+            "metrics": session.metrics.to_dict(),
+        })
+
+    except asyncio.CancelledError:
+        session.metrics.status = "killed"
+        console.print(
+            f"  [yellow]Browser agent cancelled by user for {company_name}[/yellow]"
+        )
+        await session.event_queue.put({
+            "type": "killed",
+            "reason": "user_request",
+            "partial_jobs": len(session.partial_roles),
+            "metrics": session.metrics.to_dict(),
+        })
+
+    except Exception as exc:
+        session.metrics.status = "error"
+        session.metrics.errors.append(str(exc))
+        console.print(f"  [red]Browser agent error for {company_name}: {exc}[/red]")
+        await session.event_queue.put({
+            "type": "error",
+            "error_type": "agent_error",
+            "message": str(exc),
+            "can_resume": False,
+            "metrics": session.metrics.to_dict(),
+        })
+
+
+# ── Sync wrapper (CLI path) ──────────────────────────────────────────────────
+
+
 async def _run_browser_agent(
     company_name: str,
     url: str,
@@ -228,20 +469,9 @@ async def _run_browser_agent(
     from browser_use import Agent  # type: ignore
 
     llm = _build_browser_llm(config)
-    task = (
-        f"Go to {url}. This is the careers/jobs page for {company_name}. "
-        f"Extract ALL job listings from this page. Navigate through pagination "
-        f"(Next buttons, page numbers, Load More buttons), apply any relevant "
-        f"category or location filters if needed, and keep going until you have "
-        f"seen every available role. "
-        f"Return ONLY a JSON array where each item has exactly these keys: "
-        f"title (string), location (string or 'Remote'), "
-        f"url (full absolute URL to the job posting, or empty string if none), "
-        f"department (string or null). "
-        f"Do not include any markdown fences or explanations — just the raw JSON array."
-    )
+    task = _build_task_prompt(company_name, url, None, config)
     agent = Agent(task=task, llm=llm)
-    result = await agent.run(max_steps=50)
+    result = await agent.run(max_steps=config.browser_agent_max_steps)
     return result.final_result() or ""
 
 
@@ -397,12 +627,16 @@ def _validate_role_urls(
     return [r for i, r in enumerate(roles) if not r.url or i in valid_indices]
 
 
-# ── Response parser ──────────────────────────────────────────────────────────
+# ── Response parsers ─────────────────────────────────────────────────────────
 
 
-def _parse_roles(raw_text: str, company_name: str) -> list[DiscoveredRole]:
-    """Parse LLM JSON output into DiscoveredRole objects."""
-    cleaned = raw_text.strip()
+def _try_extract_job_dicts(text: str) -> list[dict]:
+    """Extract the first valid JSON array of job-like dicts from *text*.
+
+    Used by both :func:`_parse_roles` and :class:`_StreamingLLMWrapper` to pull
+    partial results from LLM step responses.  Returns [] if nothing found.
+    """
+    cleaned = text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
     cleaned = re.sub(r"\n?\s*```$", "", cleaned)
 
@@ -412,15 +646,21 @@ def _parse_roles(raw_text: str, company_name: str) -> list[DiscoveredRole]:
         return []
 
     try:
-        data = json.loads(cleaned[start : end + 1])
+        data = json.loads(cleaned[start: end + 1])
     except json.JSONDecodeError:
         return []
 
+    if not isinstance(data, list):
+        return []
+
+    return [item for item in data if isinstance(item, dict) and item.get("title")]
+
+
+def _parse_roles(raw_text: str, company_name: str) -> list[DiscoveredRole]:
+    """Parse LLM JSON output into DiscoveredRole objects."""
     fetched_at = datetime.now(timezone.utc).isoformat()
     roles: list[DiscoveredRole] = []
-    for item in data:
-        if not isinstance(item, dict) or not item.get("title"):
-            continue
+    for item in _try_extract_job_dicts(raw_text):
         roles.append(
             DiscoveredRole(
                 company_name=company_name,
@@ -433,3 +673,27 @@ def _parse_roles(raw_text: str, company_name: str) -> list[DiscoveredRole]:
             )
         )
     return roles
+
+
+def _maybe_save_api_profile(
+    agent_output: str,
+    career_page_url: str,
+    company_name: str,
+    store,  # StorageManager
+) -> None:
+    """If the agent embedded API profile metadata in its output, persist it.
+
+    The browser-use agent returns a JSON array of job objects.  When it also
+    discovers an internal API, it may emit a JSON object with an
+    ``api_discovered`` key.  We extract and save that to ``api_profiles.json``.
+    """
+    try:
+        data = json.loads(agent_output.strip())
+        if isinstance(data, dict) and "api_discovered" in data:
+            profile = data["api_discovered"]
+            from jobfinder.storage.api_profiles import save_profile
+
+            profile.setdefault("discovered_at", datetime.now(timezone.utc).isoformat())
+            save_profile(career_page_url, company_name, profile, store)
+    except Exception:
+        pass  # agent output was a plain JSON array — nothing to save
