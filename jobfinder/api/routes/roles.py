@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 
-from jobfinder.api.models import DiscoverRolesRequest
+from jobfinder.api.models import DiscoverRolesRequest, FetchBrowserRolesRequest
 from jobfinder.config import RoleFilters, load_config, require_api_key
 from jobfinder.roles.checkpoint import CHECKPOINT_FILENAME, Checkpoint
 from jobfinder.roles.discovery import discover_roles
@@ -228,3 +228,76 @@ async def get_roles() -> dict:
     if data is None:
         raise HTTPException(status_code=404, detail="No roles found. Run discovery first.")
     return data
+
+
+@router.post("/roles/fetch-browser")
+async def fetch_browser_roles(req: FetchBrowserRolesRequest, request: Request) -> dict:
+    """Use a browser-use agent to fetch roles for a single flagged company.
+
+    The company must exist in the registry (i.e. it was previously discovered).
+    Newly found roles are merged into roles.json (deduped by URL).
+
+    Returns ``{ company_name, roles_found, roles }``.
+    """
+    config = load_config()
+    store = StorageManager(config.data_dir)
+
+    # Look up the company in the in-memory registry
+    registry: list[dict] = request.app.state.registry
+    reg_map = {e["name"].lower(): e for e in registry}
+    entry = reg_map.get(req.company_name.lower())
+    if entry is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Company '{req.company_name}' not found in registry. "
+                "Run discover-companies first."
+            ),
+        )
+
+    career_page_url = entry.get("career_page_url") or ""
+    if not career_page_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No career page URL on file for '{req.company_name}'.",
+        )
+
+    # Run the browser agent in a thread pool to avoid blocking the event loop
+    from jobfinder.roles.ats.career_page import fetch_career_page_roles_browser
+
+    try:
+        roles = await asyncio.to_thread(
+            fetch_career_page_roles_browser,
+            entry["name"],
+            career_page_url,
+            config,
+        )
+    except RuntimeError as exc:
+        # browser-use / langchain not installed
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Browser agent failed: {exc}"
+        ) from exc
+
+    # Merge new roles into roles.json (new wins on URL collision)
+    existing_data = store.read("roles.json") or {}
+    existing_roles = [
+        DiscoveredRole.model_validate(r) for r in existing_data.get("roles", [])
+    ]
+    seen: dict[str, DiscoveredRole] = {r.url: r for r in existing_roles}
+    for r in roles:
+        if r.url:
+            seen[r.url] = r
+    final_roles = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+
+    store.write(
+        "roles.json",
+        {**existing_data, "roles": [r.model_dump() for r in final_roles]},
+    )
+
+    return {
+        "company_name": entry["name"],
+        "roles_found": len(roles),
+        "roles": [r.model_dump() for r in roles],
+    }

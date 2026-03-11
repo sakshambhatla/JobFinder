@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import {
   discoverRoles,
+  fetchBrowserRoles,
   getRoles,
   getRolesCheckpoint,
   getCompanyRegistry,
@@ -144,11 +145,48 @@ function RolesTable({ roles }: { roles: DiscoveredRole[] }) {
   );
 }
 
-function FlaggedBox({ flagged }: { flagged: FlaggedCompany[] }) {
+type BrowserFetchState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; count: number }
+  | { status: "error"; message: string };
+
+function FlaggedBox({
+  flagged,
+  onBrowserFetchSuccess,
+}: {
+  flagged: FlaggedCompany[];
+  onBrowserFetchSuccess: () => void;
+}) {
+  // Per-company fetch state; keyed by company name
+  const [fetchStates, setFetchStates] = useState<Record<string, BrowserFetchState>>({});
+  // Only one agent may run at a time
+  const anyLoading = Object.values(fetchStates).some((s) => s.status === "loading");
+
+  async function handleFetch(company: FlaggedCompany) {
+    setFetchStates((prev) => ({ ...prev, [company.name]: { status: "loading" } }));
+    try {
+      const result = await fetchBrowserRoles(company.name);
+      setFetchStates((prev) => ({
+        ...prev,
+        [company.name]: { status: "success", count: result.roles_found },
+      }));
+      // Refresh the roles table so newly found roles appear
+      onBrowserFetchSuccess();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } }; message: string };
+      const msg = axiosErr.response?.data?.detail ?? axiosErr.message;
+      setFetchStates((prev) => ({
+        ...prev,
+        [company.name]: { status: "error", message: msg },
+      }));
+    }
+  }
+
   if (flagged.length === 0) return null;
   return (
     <div
-      className="rounded-xl border p-4 space-y-2"
+      className="rounded-xl border p-4 space-y-3"
       style={{
         background: "rgba(234,179,8,0.10)",
         backdropFilter: "blur(8px)",
@@ -159,17 +197,61 @@ function FlaggedBox({ flagged }: { flagged: FlaggedCompany[] }) {
       <p className="text-sm font-medium text-yellow-200">
         ⚠️ {flagged.length} {flagged.length === 1 ? "company" : "companies"} need manual check
       </p>
-      <div className="space-y-1">
-        {flagged.map((f) => (
-          <div key={f.name} className="text-xs text-yellow-300 flex items-center gap-2">
-            <span className="font-medium">{f.name}</span>
-            <span className="text-yellow-400/70">({f.ats_type})</span>
-            <a href={f.career_page_url} target="_blank" rel="noopener noreferrer"
-              className="underline underline-offset-2 text-yellow-300/80 hover:text-yellow-200">
-              Open ↗
-            </a>
-          </div>
-        ))}
+      <div className="space-y-2">
+        {flagged.map((f) => {
+          const state: BrowserFetchState = fetchStates[f.name] ?? { status: "idle" };
+          const isLoading = state.status === "loading";
+          return (
+            <div key={f.name} className="flex flex-wrap items-center gap-2 text-xs text-yellow-300">
+              <span className="font-medium">{f.name}</span>
+              <span className="text-yellow-400/70">({f.ats_type})</span>
+              {f.career_page_url && (
+                <a
+                  href={f.career_page_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-2 text-yellow-300/80 hover:text-yellow-200"
+                >
+                  Open ↗
+                </a>
+              )}
+
+              {/* Browser agent fetch button */}
+              <button
+                onClick={() => handleFetch(f)}
+                disabled={anyLoading || state.status === "success"}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium
+                           transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(234,179,8,0.20)",
+                  border: "1px solid rgba(234,179,8,0.40)",
+                  color: "rgba(253,224,71,0.90)",
+                }}
+              >
+                {isLoading ? (
+                  <>
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Fetching…
+                  </>
+                ) : (
+                  "Fetch via Browser Agent"
+                )}
+              </button>
+
+              {/* Inline result / error */}
+              {state.status === "success" && (
+                <span className="text-emerald-400 font-medium">
+                  ✓ {state.count} role{state.count !== 1 ? "s" : ""} found
+                </span>
+              )}
+              {state.status === "error" && (
+                <span className="text-red-400" title={state.message}>
+                  ✗ {state.message.length > 60 ? state.message.slice(0, 60) + "…" : state.message}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -531,7 +613,10 @@ export function RolesTab() {
               No roles matched your filters.
             </p>
           )}
-          <FlaggedBox flagged={flagged} />
+          <FlaggedBox
+            flagged={flagged}
+            onBrowserFetchSuccess={() => qc.invalidateQueries({ queryKey: ["roles"] })}
+          />
         </div>
       )}
     </div>

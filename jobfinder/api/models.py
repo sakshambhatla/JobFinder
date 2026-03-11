@@ -24,3 +24,7 @@ class DiscoverRolesRequest(BaseModel):
     role_filters: RoleFiltersRequest | None = None  # overrides config.role_filters
     relevance_score_criteria: str | None = None  # overrides config
     model_provider: str | None = None  # overrides config
+
+
+class FetchBrowserRolesRequest(BaseModel):
+    company_name: str  # must exist in the company registry

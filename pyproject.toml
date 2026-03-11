@@ -15,6 +15,19 @@ dependencies = [
     "python-multipart>=0.0.9",
 ]
 
+[project.optional-dependencies]
+# Playwright: headless browser for rendering JS-heavy career pages (Tier 2, auto)
+# After install: playwright install chromium
+playwright = ["playwright>=1.40"]
+
+# browser-use: LLM-driven agent for interactive career pages with pagination/filters (Tier 3, manual)
+# Requires langchain bridge for whichever provider you use:
+#   pip install "jobfinder[browser-use,langchain-anthropic]"    (Anthropic)
+#   pip install "jobfinder[browser-use,langchain-google-genai]" (Gemini)
+browser-use = ["browser-use>=0.1"]
+langchain-anthropic = ["langchain-anthropic>=0.3"]
+langchain-google-genai = ["langchain-google-genai>=2.0"]
+
 [project.scripts]
 jobfinder = "jobfinder.cli:cli"
 

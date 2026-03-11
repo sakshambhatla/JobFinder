@@ -400,6 +400,94 @@ def discover_roles_cmd(
     display_flagged(flagged_dicts)
 
 
+@cli.command("browser-fetch")
+@click.option(
+    "--company",
+    required=True,
+    help="Company name to fetch roles for (must exist in registry)",
+)
+@click.pass_context
+def browser_fetch_cmd(ctx: click.Context, company: str) -> None:
+    """Use an autonomous browser agent to fetch roles from a company's career page.
+
+    The company must have been previously discovered via discover-companies.
+    Roles found are merged into roles.json (deduped by URL).
+
+    Requires: pip install browser-use langchain-anthropic langchain-google-genai
+    """
+    from jobfinder.roles.ats.career_page import fetch_career_page_roles_browser
+    from jobfinder.storage.registry import REGISTRY_FILENAME
+    from jobfinder.storage.schemas import DiscoveredRole
+
+    config = load_config(ctx.obj["config_path"])
+    store = StorageManager(config.data_dir)
+
+    # Load registry
+    reg_data = store.read(REGISTRY_FILENAME)
+    if not reg_data:
+        display_error(
+            "Registry is empty. Run 'jobfinder discover-companies' first."
+        )
+        raise SystemExit(1)
+
+    reg_map = {e["name"].lower(): e for e in reg_data.get("companies", [])}
+    entry = reg_map.get(company.lower())
+    if entry is None:
+        display_error(
+            f"Company '{company}' not found in registry. "
+            "Run 'jobfinder discover-companies' first."
+        )
+        raise SystemExit(1)
+
+    career_page_url = entry.get("career_page_url", "")
+    if not career_page_url:
+        display_error(f"No career page URL on file for '{company}'.")
+        raise SystemExit(1)
+
+    require_api_key(config.model_provider)
+
+    console.print(
+        f"Starting browser agent for [bold]{entry['name']}[/bold] → {career_page_url}"
+    )
+
+    try:
+        roles = fetch_career_page_roles_browser(
+            entry["name"], career_page_url, config
+        )
+    except RuntimeError as exc:
+        display_error(str(exc))
+        raise SystemExit(1)
+    except Exception as exc:
+        display_error(f"Browser agent failed: {exc}")
+        raise SystemExit(1)
+
+    if not roles:
+        console.print("[yellow]No roles found via browser agent.[/yellow]")
+        return
+
+    # Merge into roles.json
+    existing_data = store.read("roles.json") or {}
+    existing_roles = [
+        DiscoveredRole.model_validate(r)
+        for r in existing_data.get("roles", [])
+    ]
+    seen: dict[str, DiscoveredRole] = {r.url: r for r in existing_roles}
+    for r in roles:
+        if r.url:
+            seen[r.url] = r
+    final_roles = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+
+    store.write(
+        "roles.json",
+        {**existing_data, "roles": [r.model_dump() for r in final_roles]},
+    )
+
+    display_success(
+        f"Browser agent found {len(roles)} roles for {entry['name']}."
+    )
+    display_roles([r.model_dump() for r in roles])
+
+
 @cli.command("serve")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind to")
 @click.option("--port", default=8000, show_default=True, type=int, help="Port to listen on")

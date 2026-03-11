@@ -149,3 +149,18 @@ export async function getRolesCheckpoint(): Promise<RolesCheckpoint | null> {
     return null;
   }
 }
+
+export interface BrowserFetchResult {
+  company_name: string;
+  roles_found: number;
+  roles: DiscoveredRole[];
+}
+
+export async function fetchBrowserRoles(
+  company_name: string
+): Promise<BrowserFetchResult> {
+  const { data } = await api.post<BrowserFetchResult>("/roles/fetch-browser", {
+    company_name,
+  });
+  return data;
+}
