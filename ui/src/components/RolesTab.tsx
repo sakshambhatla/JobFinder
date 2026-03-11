@@ -197,6 +197,8 @@ function FlaggedBox({
 }) {
   const qc = useQueryClient();
   const [agentStates, setAgentStates] = useState<Record<string, CompanyAgentState>>({});
+  // Per-company custom URL, used when registry has no career_page_url
+  const [customUrls, setCustomUrls] = useState<Record<string, string>>({});
   // One EventSource ref per company; cleanup happens inside event handlers
   const esRefs = useRef<Record<string, EventSource>>({});
 
@@ -210,11 +212,11 @@ function FlaggedBox({
     }));
   }
 
-  function startAgent(company: FlaggedCompany) {
+  function startAgent(company: FlaggedCompany, urlOverride?: string) {
     if (esRefs.current[company.name]) return; // already running
     updateState(company.name, () => ({ status: "running", jobsCollected: 0 }));
 
-    const es = new EventSource(browserAgentStreamUrl(company.name));
+    const es = new EventSource(browserAgentStreamUrl(company.name, urlOverride));
     esRefs.current[company.name] = es;
 
     es.addEventListener("jobs_batch", (e) => {
@@ -313,9 +315,14 @@ function FlaggedBox({
         borderColor: "rgba(234,179,8,0.30)",
       }}
     >
-      <p className="text-sm font-medium text-yellow-200">
-        ⚠️ {flagged.length} {flagged.length === 1 ? "company" : "companies"} need manual check
-      </p>
+      <div>
+        <p className="text-sm font-medium text-yellow-200">
+          ⚠️ {flagged.length} {flagged.length === 1 ? "company" : "companies"} flagged — no public ATS API
+        </p>
+        <p className="text-xs text-yellow-300/60 mt-0.5">
+          Use the browser agent below to attempt agentic role extraction. This is a separate manual step.
+        </p>
+      </div>
 
       <div className="space-y-3">
         {flagged.map((f) => {
@@ -324,6 +331,9 @@ function FlaggedBox({
             jobsCollected: 0,
           };
           const isRunning = state.status === "running";
+          // Effective URL: registry entry takes precedence; fall back to user-entered value
+          const effectiveUrl = f.career_page_url || customUrls[f.name] || "";
+          const needsUrl = !f.career_page_url;
 
           return (
             <div key={f.name} className="space-y-1.5">
@@ -331,9 +341,9 @@ function FlaggedBox({
               <div className="flex flex-wrap items-center gap-2 text-xs text-yellow-300">
                 <span className="font-semibold">{f.name}</span>
                 <span className="text-yellow-400/60">({f.ats_type})</span>
-                {f.career_page_url && (
+                {effectiveUrl && (
                   <a
-                    href={f.career_page_url}
+                    href={effectiveUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="underline underline-offset-2 text-yellow-300/70 hover:text-yellow-200"
@@ -343,19 +353,40 @@ function FlaggedBox({
                 )}
               </div>
 
+              {/* Inline URL input for companies with no registry career page URL */}
+              {needsUrl && state.status === "idle" && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    placeholder="Enter career page URL to enable browser agent…"
+                    value={customUrls[f.name] ?? ""}
+                    onChange={(e) =>
+                      setCustomUrls((prev) => ({ ...prev, [f.name]: e.target.value }))
+                    }
+                    className="flex-1 h-7 rounded-md px-2.5 py-1 text-xs text-white/90 outline-none"
+                    style={{
+                      background: "rgba(234,179,8,0.12)",
+                      border: "1px solid rgba(234,179,8,0.30)",
+                    }}
+                  />
+                </div>
+              )}
+
               {/* Status / action row */}
               <div className="flex flex-wrap items-center gap-2 text-xs pl-0">
                 {state.status === "idle" && (
                   <button
-                    onClick={() => startAgent(f)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
+                    onClick={() => startAgent(f, needsUrl ? effectiveUrl : undefined)}
+                    disabled={!effectiveUrl}
+                    title={!effectiveUrl ? "Enter a career page URL above to enable" : undefined}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{
                       background: "rgba(234,179,8,0.20)",
                       border: "1px solid rgba(234,179,8,0.40)",
                       color: "rgba(253,224,71,0.90)",
                     }}
                   >
-                    Fetch via Browser Agent
+                    🤖 Fetch via Browser Agent
                   </button>
                 )}
 
@@ -400,7 +431,7 @@ function FlaggedBox({
                       : "no jobs collected"}
                     {state.status === "killed" && (
                       <button
-                        onClick={() => startAgent(f)}
+                        onClick={() => startAgent(f, needsUrl ? effectiveUrl : undefined)}
                         className="ml-2 underline underline-offset-2 text-yellow-300/70 hover:text-yellow-200"
                       >
                         Retry
@@ -416,7 +447,7 @@ function FlaggedBox({
                       ? (state.errorMessage ?? "Unknown error").slice(0, 80) + "…"
                       : (state.errorMessage ?? "Unknown error")}
                     <button
-                      onClick={() => startAgent(f)}
+                      onClick={() => startAgent(f, needsUrl ? effectiveUrl : undefined)}
                       className="ml-2 underline underline-offset-2 text-red-300/70 hover:text-red-200"
                     >
                       Retry

@@ -217,9 +217,20 @@ export interface BrowserAgentErrorEvent {
 /**
  * Build the SSE URL for a company's browser-agent stream.
  * Pass this to `new EventSource(url)` — do NOT use axios for SSE.
+ *
+ * @param careerPageUrlOverride  Provide when the registry has no career page URL
+ *   for the company (e.g. Workday companies). The backend will use this URL
+ *   instead of the one in the registry.
  */
-export function browserAgentStreamUrl(company_name: string): string {
-  return `/api/roles/fetch-browser/stream?company_name=${encodeURIComponent(company_name)}`;
+export function browserAgentStreamUrl(
+  company_name: string,
+  careerPageUrlOverride?: string,
+): string {
+  let url = `/api/roles/fetch-browser/stream?company_name=${encodeURIComponent(company_name)}`;
+  if (careerPageUrlOverride) {
+    url += `&career_page_url_override=${encodeURIComponent(careerPageUrlOverride)}`;
+  }
+  return url;
 }
 
 /** Send a kill signal to a running browser agent. */

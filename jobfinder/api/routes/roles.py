@@ -231,8 +231,15 @@ async def get_roles() -> dict:
 
 
 @router.get("/roles/fetch-browser/stream")
-async def stream_browser_fetch(company_name: str, request: Request):
+async def stream_browser_fetch(
+    company_name: str,
+    request: Request,
+    career_page_url_override: str | None = None,
+):
     """Stream real-time browser-agent progress for a flagged company via SSE.
+
+    Pass ``career_page_url_override`` to supply a URL when the registry entry has
+    none configured (e.g. Workday companies without a stored career page URL).
 
     SSE event types emitted (``event`` field) and their JSON payloads:
 
@@ -267,11 +274,14 @@ async def stream_browser_fetch(company_name: str, request: Request):
             status_code=400,
             detail=f"Company '{company_name}' not found in registry.",
         )
-    career_page_url = entry.get("career_page_url") or ""
+    career_page_url = entry.get("career_page_url") or career_page_url_override or ""
     if not career_page_url:
         raise HTTPException(
             status_code=400,
-            detail=f"No career page URL on file for '{entry['name']}'.",
+            detail=(
+                f"No career page URL on file for '{entry['name']}'. "
+                f"Pass career_page_url_override to provide one."
+            ),
         )
 
     # ── Session setup ─────────────────────────────────────────────────────────
