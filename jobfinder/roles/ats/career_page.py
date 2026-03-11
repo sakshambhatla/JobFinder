@@ -46,7 +46,8 @@ def fetch_career_page_roles(
     html = _fetch_html_playwright(career_page_url, timeout=config.request_timeout)
     if html is None:
         console.print(
-            f"  [dim]Career page unreachable: {career_page_url}[/dim]"
+            f"  [dim]Career page not loaded — skipping LLM extraction "
+            f"for {career_page_url}[/dim]"
         )
         return []
     raw_text = _call_llm(html, config)
@@ -175,7 +176,7 @@ def _fetch_html_playwright(url: str, timeout: int) -> str | None:
                     content = await page.content()
                 except Exception as exc:
                     console.print(
-                        f"  [yellow]⚠ Playwright timeout/error for {url}: {exc}[/yellow]"
+                        f"  [yellow]⚠ Playwright timed out rendering {url}: {exc}[/yellow]"
                     )
                     await browser.close()
                     return None

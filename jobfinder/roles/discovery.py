@@ -34,6 +34,12 @@ def discover_roles(
     cache = RolesCache(store)
 
     # ── Pass 1: ATS API fetch ────────────────────────────────────────────────
+    n_companies = len(companies)
+    console.print(
+        f"\n[bold]Pass 1 — ATS API[/bold] "
+        f"({n_companies} {'company' if n_companies == 1 else 'companies'}): "
+        f"fetching structured job feeds..."
+    )
     for company in companies:
         # Cache check
         if use_cache:
@@ -55,7 +61,8 @@ def discover_roles(
                 all_roles.extend(roles)
                 cache.put(company.name, company.ats_type, roles)
                 console.print(
-                    f"  [green]{company.name}[/green]: {len(roles)} roles found"
+                    f"  [green]✓ {company.name}[/green]: {len(roles)} roles "
+                    f"via [cyan]{company.ats_type.upper()}[/cyan] API"
                 )
             except UnsupportedATSError:
                 flagged.append(
@@ -90,7 +97,22 @@ def discover_roles(
                 )
                 display_warning(f"{company.name}: Unexpected error — {exc}")
 
+    # ── Pass 1 summary ───────────────────────────────────────────────────────
+    _n_flagged = len(flagged)
+    console.print(
+        f"  [dim]Pass 1 complete: {len(all_roles)} roles fetched"
+        + (f" · {_n_flagged} {'company' if _n_flagged == 1 else 'companies'} "
+           f"had no public API (will try career page)" if _n_flagged else "")
+        + "[/dim]"
+    )
+
     # ── Pass 2: career page supplemental fetch ───────────────────────────────
+    _has_career_pages = any(c.career_page_url for c in companies)
+    if _has_career_pages:
+        console.print(
+            "\n[bold]Pass 2 — Career page supplement[/bold]: "
+            "rendering pages with Playwright and extracting roles with LLM..."
+        )
     existing_urls: set[str] = {r.url for r in all_roles if r.url}
     flagged_names: set[str] = {f.name.lower() for f in flagged}
 
@@ -146,12 +168,18 @@ def discover_roles(
                     )
                 elif new_roles:
                     console.print(
-                        f"  [green]{company.name}[/green]: "
+                        f"  [green]✓ {company.name}[/green]: "
                         f"{len(new_roles)} additional roles via career page"
                     )
                 elif is_fallback and not cp_roles:
                     display_warning(
                         f"{company.name}: career page returned no roles — manual check needed"
+                    )
+                else:
+                    # ATS succeeded and career page added nothing new — clarify impact
+                    console.print(
+                        f"  [dim]{company.name}: career page check found no new roles "
+                        f"(ATS feed appears complete)[/dim]"
                     )
             except Exception as exc:
                 if is_fallback:
@@ -163,5 +191,15 @@ def discover_roles(
                 searchable = False
 
             update_registry_searchable(store, company.name, searchable)
+
+    # ── Fetch summary ────────────────────────────────────────────────────────
+    n_unique_cos = len({r.company_name for r in all_roles})
+    n_final_flagged = len(flagged)
+    console.print(
+        f"\n[bold]Fetch complete[/bold]: {len(all_roles)} roles"
+        + (f" across {n_unique_cos} companies" if n_unique_cos != n_companies else "")
+        + (f" · [yellow]{n_final_flagged} flagged[/yellow] (no ATS + career page empty)"
+           if n_final_flagged else "")
+    )
 
     return all_roles, flagged

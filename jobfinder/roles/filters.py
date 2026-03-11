@@ -191,7 +191,10 @@ def filter_roles(
             f"({len(matched)} roles matched so far)..."
         )
     else:
-        console.print(f"\nFiltering [bold]{len(roles)}[/bold] roles with: {filter_desc}")
+        console.print(
+            f"\n[bold]→ LLM Filter[/bold]: {len(roles)} roles · "
+            f"criteria: {filter_desc}"
+        )
 
     start_offset = resume_batches * BATCH_SIZE
 
