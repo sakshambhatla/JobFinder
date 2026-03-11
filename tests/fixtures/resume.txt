@@ -1,0 +1,15 @@
+John Doe — Senior Data Engineer
+
+SKILLS
+Python, SQL, Spark, Flink, Kafka, distributed systems, data pipelines, Airflow
+
+EXPERIENCE
+Staff Data Engineer at Google (2021–present)
+  Built a streaming data platform processing 10TB/day using Spark and Kafka.
+
+Senior Data Engineer at Amazon (2018–2021)
+  Led migration to Spark on EMR, reducing processing costs by 40%.
+
+EDUCATION
+MS Computer Science, Stanford University, 2018
+BS Computer Science, UC Berkeley, 2016

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "aabbccdd-1111-2222-3333-444455556666",
+    "text": "Senior Software Engineer",
+    "hostedUrl": "https://jobs.lever.co/acme/aabbccdd-1111-2222-3333-444455556666",
+    "applyUrl": "https://jobs.lever.co/acme/aabbccdd-1111-2222-3333-444455556666/apply",
+    "categories": {
+      "department": "Engineering",
+      "location": "San Francisco, CA",
+      "team": "Platform",
+      "commitment": "Full-time"
+    },
+    "workplaceType": "hybrid",
+    "createdAt": 1704067200000,
+    "description": "<p>We are looking for a senior engineer.</p>"
+  },
+  {
+    "id": "bbccddee-2222-3333-4444-555566667777",
+    "text": "Data Engineer",
+    "hostedUrl": "https://jobs.lever.co/acme/bbccddee-2222-3333-4444-555566667777",
+    "applyUrl": "https://jobs.lever.co/acme/bbccddee-2222-3333-4444-555566667777/apply",
+    "categories": {
+      "department": "Engineering",
+      "location": "Remote",
+      "team": "Data Infrastructure",
+      "commitment": "Full-time"
+    },
+    "workplaceType": "remote",
+    "createdAt": 1704153600000,
+    "description": "<p>Join our data team.</p>"
+  }
+]

@@ -66,3 +66,21 @@ API keys from env only: `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`.
 - **Multi-provider**: add `_call_<provider>()` + branch in each `discovery.py`, plus key check in `config.py:require_api_key()`
 - **Graceful degradation**: ATS failures → `flagged` list, not crashes
 - **API mirrors CLI**: routes call the same core functions; blocking calls wrapped in `asyncio.to_thread()`
+
+## Testing Convention
+
+After any major code change (new feature, significant refactor):
+1. **Run CLI tests** — use the `run-cli-tests` skill (triggers on: "run CLI tests", "run pytest", "run backend tests")
+2. **Run UI tests** — use the `run-ui-tests` skill (triggers on: "run UI tests", "run frontend tests", "run vitest")
+
+Both must pass before committing. Quick reference:
+```bash
+# CLI tests (64 tests covering resume parser, ATS fetchers, storage, config, API routes)
+source .venv/bin/activate && pytest tests/ -v --tb=short
+
+# UI tests (12 tests covering ResumeTab rendering and API helpers)
+/Users/sakshambhatla/.nvm/versions/node/v20.20.1/bin/pnpm --dir ui test
+```
+
+Test files: `tests/` (backend) · `ui/src/tests/` (frontend)
+Install test deps: `pip install -e ".[dev]"` · `pnpm --dir ui install`
