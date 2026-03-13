@@ -148,15 +148,33 @@ def _fetch_html_playwright(url: str, timeout: int) -> str | None:
 
         async def _render() -> str | None:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        # Stability in sandboxed / CI environments
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                    ],
+                )
+                page = await browser.new_page(
+                    viewport={"width": 1280, "height": 800},
+                )
                 await page.set_extra_http_headers(
-                    {"User-Agent": "Mozilla/5.0 JobFinder/1.0"}
+                    {
+                        "User-Agent": (
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/122.0.0.0 Safari/537.36"
+                        )
+                    }
                 )
                 try:
                     response = await page.goto(
                         url,
-                        wait_until="networkidle",
+                        # "domcontentloaded" is reliable on chatty sites (Apple,
+                        # Netflix, Discord, Roblox…) that never reach networkidle
+                        # because of continuous telemetry/analytics traffic.
+                        wait_until="domcontentloaded",
                         timeout=timeout * 1_000,
                     )
                     if response is not None:
@@ -173,6 +191,8 @@ def _fetch_html_playwright(url: str, timeout: int) -> str | None:
                         if response.status >= 400:
                             await browser.close()
                             return None
+                    # Brief pause for JS-rendered content (SPAs hydrate after DCL)
+                    await page.wait_for_timeout(1_500)
                     content = await page.content()
                 except Exception as exc:
                     console.print(
@@ -241,6 +261,31 @@ def _build_task_prompt(
             f"Use this endpoint directly — skip manual page navigation. "
         )
 
+    # Build filter hint when the user has configured role_filters.
+    filter_hint = ""
+    if config.role_filters:
+        f = config.role_filters
+        parts = []
+        if f.title:
+            parts.append(
+                f'job title/type "{f.title}" — use the site\'s search bar or category filter'
+            )
+        if f.location:
+            parts.append(
+                f'location "{f.location}" — use the site\'s location filter if available'
+            )
+        if f.posted_after:
+            parts.append(
+                f'posted after {f.posted_after} — use the date-posted filter if available'
+            )
+        if parts:
+            filter_hint = (
+                "APPLY THESE FILTERS FIRST using the site's own search/filter UI before "
+                "collecting results — this will significantly narrow the total roles: "
+                + "; ".join(parts)
+                + ". "
+            )
+
     rate_hint = (
         f"If you encounter rate limiting (HTTP 429 or messages like 'Please rel...'), "
         f"wait {config.browser_agent_rate_limit_initial_wait}s then double the wait "
@@ -248,13 +293,26 @@ def _build_task_prompt(
         f"{config.browser_agent_rate_limit_max_retries} consecutive failures. "
     )
 
+    efficiency_hint = (
+        "EFFICIENCY RULES: "
+        "Extract visible jobs from the DOM on the first page immediately — "
+        "don't spend more than 2–3 steps trying to find a bulk API endpoint before "
+        "falling back to page-by-page DOM extraction. "
+        "If a JavaScript fetch() fails with a CORS or network error, do NOT retry "
+        "the same approach with minor variations — move on to DOM extraction or "
+        "direct browser navigation instead. "
+        "If the site shows hundreds or thousands of results, use the site's own "
+        "search/filter UI to narrow the listing before paginating. "
+    )
+
     return (
         f"Go to {url}. This is the careers/jobs page for {company_name}. "
         f"{api_hint}"
-        f"Extract ALL job listings from this page. Navigate through pagination "
-        f"(Next buttons, page numbers, Load More buttons), apply any relevant "
-        f"category or location filters if needed, and keep going until you have "
+        f"{filter_hint}"
+        f"Extract ALL matching job listings from this page. Navigate through pagination "
+        f"(Next buttons, page numbers, Load More buttons) and keep going until you have "
         f"seen every available role. "
+        f"{efficiency_hint}"
         f"{rate_hint}"
         f"Return ONLY a JSON array where each item has exactly these keys: "
         f"title (string), location (string or 'Remote'), "
@@ -285,14 +343,14 @@ class _StreamingLLMWrapper:
     def __getattr__(self, name: str):
         return getattr(self._llm, name)
 
-    async def ainvoke(self, messages, **kwargs):
-        response = await self._llm.ainvoke(messages, **kwargs)
+    async def ainvoke(self, messages, *args, **kwargs):
+        response = await self._llm.ainvoke(messages, *args, **kwargs)
         self._maybe_emit_jobs(str(getattr(response, "content", "")))
         return response
 
     # Some browser-use code paths call invoke() synchronously
-    def invoke(self, messages, **kwargs):
-        response = self._llm.invoke(messages, **kwargs)
+    def invoke(self, messages, *args, **kwargs):
+        response = self._llm.invoke(messages, *args, **kwargs)
         self._maybe_emit_jobs(str(getattr(response, "content", "")))
         return response
 
@@ -319,15 +377,32 @@ class _StreamingLLMWrapper:
 
 
 async def _run_with_kill_check(agent, session, max_steps: int):
-    """Run ``agent.run(max_steps)`` but cancel if ``session.kill_event`` fires."""
+    """Run ``agent.run(max_steps)`` but cancel if ``session.kill_event`` fires.
+
+    ``agent.run()`` is launched as an independent ``asyncio.Task`` so it can be
+    cancelled from outside.  When our own coroutine is cancelled (e.g. by
+    ``asyncio.wait_for`` firing its timeout), we must explicitly cancel
+    ``run_task`` too — otherwise it becomes an orphaned task that keeps running
+    after the caller has already emitted a ``killed`` event to the UI.
+    """
     import asyncio
 
     run_task = asyncio.create_task(agent.run(max_steps=max_steps))
-    while not run_task.done():
-        if session.kill_event.is_set():
+    try:
+        while not run_task.done():
+            if session.kill_event.is_set():
+                run_task.cancel()
+                break
+            await asyncio.sleep(0.5)
+    except asyncio.CancelledError:
+        # Parent cancelled (e.g. asyncio.wait_for timeout) — stop the agent task.
+        if not run_task.done():
             run_task.cancel()
-            break
-        await asyncio.sleep(0.5)
+            try:
+                await asyncio.wait_for(asyncio.shield(run_task), timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+        raise
     try:
         return await run_task
     except asyncio.CancelledError:

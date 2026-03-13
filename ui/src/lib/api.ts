@@ -198,6 +198,12 @@ export interface BrowserAgentDoneEvent {
   metrics: BrowserAgentMetrics;
 }
 
+/** SSE payload: relevance scoring completed, emitted just before done/killed */
+export interface BrowserAgentScoreResultEvent {
+  type: "score_result";
+  scored: number;
+}
+
 /** SSE payload: agent killed by time limit or user request */
 export interface BrowserAgentKilledEvent {
   type: "killed";

@@ -16,8 +16,8 @@ class TestAppConfigDefaults:
 
     def test_default_browser_agent_fields(self):
         cfg = AppConfig()
-        assert cfg.browser_agent_max_time_minutes == 7
-        assert cfg.browser_agent_max_steps == 50
+        assert cfg.browser_agent_max_time_minutes == 15
+        assert cfg.browser_agent_max_steps == 100
         assert cfg.browser_agent_rate_limit_max_retries == 5
         assert cfg.browser_agent_rate_limit_initial_wait == 5
 

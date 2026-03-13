@@ -156,6 +156,7 @@ interface CompanyAgentState {
   status: AgentStatus;
   jobsCollected: number;
   partialJobs?: number;
+  scoredCount?: number;
   metrics?: BrowserAgentMetrics;
   errorMessage?: string;
 }
@@ -236,16 +237,22 @@ function FlaggedBox({
       }
     });
 
+    es.addEventListener("score_result", (e) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      updateState(company.name, (prev) => ({ ...prev, scoredCount: data.scored }));
+    });
+
     es.addEventListener("done", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
       updateState(company.name, (prev) => ({
         status: "done",
         jobsCollected: data.metrics?.jobs_collected ?? prev.jobsCollected,
+        scoredCount: prev.scoredCount,
         metrics: data.metrics,
       }));
       es.close();
       delete esRefs.current[company.name];
-      // Refresh so any unfiltered partial roles saved to roles.json appear in the table
+      // Refresh after scoring — roles.json now has relevance_score set
       onDone();
     });
 
@@ -254,11 +261,14 @@ function FlaggedBox({
       updateState(company.name, (prev) => ({
         status: "killed",
         jobsCollected: prev.jobsCollected,
+        scoredCount: prev.scoredCount,
         partialJobs: data.partial_jobs,
         metrics: data.metrics,
       }));
       es.close();
       delete esRefs.current[company.name];
+      // Refresh so scored partial roles saved to roles.json appear in the table
+      onDone();
     });
 
     // "error" covers both our custom SSE error events and connection failures.
@@ -415,6 +425,11 @@ function FlaggedBox({
                 {state.status === "done" && (
                   <span className="text-emerald-400 font-medium">
                     ✓ {state.jobsCollected} job{state.jobsCollected !== 1 ? "s" : ""} found
+                    {state.scoredCount != null && (
+                      <span className="text-emerald-400/75 font-normal ml-1">
+                        · {state.scoredCount} scored
+                      </span>
+                    )}
                     {state.metrics && (
                       <span className="text-emerald-400/60 font-normal ml-1">
                         ({Math.round(state.metrics.elapsed_seconds)}s)
@@ -427,7 +442,7 @@ function FlaggedBox({
                   <span className="text-yellow-500/90">
                     ✋ Stopped —{" "}
                     {(state.partialJobs ?? state.jobsCollected) > 0
-                      ? `${state.partialJobs ?? state.jobsCollected} partial jobs saved`
+                      ? `${state.partialJobs ?? state.jobsCollected} partial jobs saved${state.scoredCount != null ? ` · ${state.scoredCount} scored` : ""}`
                       : "no jobs collected"}
                     {state.status === "killed" && (
                       <button

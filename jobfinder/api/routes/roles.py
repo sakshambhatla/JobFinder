@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 
 from jobfinder.api.models import DiscoverRolesRequest, FetchBrowserRolesRequest
-from jobfinder.config import RoleFilters, load_config, require_api_key
+from jobfinder.config import AppConfig, RoleFilters, load_config, require_api_key
 from jobfinder.roles.checkpoint import CHECKPOINT_FILENAME, Checkpoint
 from jobfinder.roles.discovery import discover_roles
 from jobfinder.roles.errors import RateLimitError
@@ -18,6 +18,80 @@ router = APIRouter()
 
 def _make_checkpoint(store: StorageManager) -> Checkpoint:
     return Checkpoint(store.data_dir / CHECKPOINT_FILENAME)
+
+
+# ── Browser-agent shared helpers ──────────────────────────────────────────────
+
+def _to_roles(
+    jobs: list[dict],
+    company_name: str,
+    fetched_at: str,
+) -> list[DiscoveredRole]:
+    """Convert raw agent job dicts to DiscoveredRole objects."""
+    result: list[DiscoveredRole] = []
+    for j in jobs:
+        try:
+            result.append(
+                DiscoveredRole(
+                    company_name=company_name,
+                    title=j.get("title", ""),
+                    location=j.get("location") or "Unknown",
+                    url=j.get("url") or "",
+                    department=j.get("department") or None,
+                    ats_type="career_page",
+                    fetched_at=fetched_at,
+                )
+            )
+        except Exception:
+            pass
+    return result
+
+
+def _merge_to_file(
+    role_dicts: list[dict],
+    store: StorageManager,
+    existing_data: dict | None = None,
+) -> None:
+    """Upsert *role_dicts* into roles.json (dedup by URL, sort by score)."""
+    data = existing_data if existing_data is not None else (store.read("roles.json") or {})
+    existing = [DiscoveredRole.model_validate(r) for r in data.get("roles", [])]
+    seen: dict[str, DiscoveredRole] = {r.url: r for r in existing}
+    for d in role_dicts:
+        try:
+            r = DiscoveredRole.model_validate(d)
+            if r.url:
+                seen[r.url] = r
+        except Exception:
+            pass
+    final = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+    store.write("roles.json", {**data, "roles": [r.model_dump() for r in final]})
+
+
+async def _score_browser_roles(
+    company_name: str,
+    config: AppConfig,
+    store: StorageManager,
+) -> int:
+    """Score all stored roles for *company_name*.  Returns count of scored roles."""
+    if not config.relevance_score_criteria:
+        return 0
+    from jobfinder.roles.scorer import score_roles
+
+    roles_data = store.read("roles.json") or {}
+    all_roles = [DiscoveredRole.model_validate(r) for r in roles_data.get("roles", [])]
+    company_roles = [r for r in all_roles if r.company_name == company_name]
+    if not company_roles:
+        return 0
+    try:
+        scored = await asyncio.to_thread(
+            score_roles, company_roles, config.relevance_score_criteria, config
+        )
+    except Exception:
+        return 0
+    other_roles = [r for r in all_roles if r.company_name != company_name]
+    final = sorted(other_roles + scored, key=lambda r: -(r.relevance_score or 0))
+    store.write("roles.json", {**roles_data, "roles": [r.model_dump() for r in final]})
+    return len(scored)
 
 
 @router.post("/roles/discover")
@@ -245,6 +319,7 @@ async def stream_browser_fetch(
 
     - ``jobs_batch``    — ``{jobs[], total_so_far}``  whenever new jobs are found
     - ``filter_result`` — ``{filtered[], kept, dropped}``  after LLM filter pipeline
+    - ``score_result``  — ``{scored}``  emitted just before done/killed when scoring ran
     - ``done``          — ``{metrics}``  on clean completion
     - ``killed``        — ``{reason, partial_jobs, metrics}``  on time-limit or kill
     - ``error``         — ``{error_type, message, can_resume}``  on failure
@@ -294,45 +369,13 @@ async def stream_browser_fetch(
     )
     request.app.state.running_agents[entry["name"]] = session
 
-    # ── Local helpers (closures over entry / config / store / session) ────────
+    # ── Local helpers (thin wrappers that bind entry / store / session) ─────────
 
-    def _to_roles(jobs: list[dict]) -> list[DiscoveredRole]:
-        """Convert raw agent job dicts to DiscoveredRole objects."""
-        fetched_at = datetime.now(timezone.utc).isoformat()
-        result: list[DiscoveredRole] = []
-        for j in jobs:
-            try:
-                result.append(
-                    DiscoveredRole(
-                        company_name=entry["name"],
-                        title=j.get("title", ""),
-                        location=j.get("location") or "Unknown",
-                        url=j.get("url") or "",
-                        department=j.get("department") or None,
-                        ats_type="career_page",
-                        fetched_at=fetched_at,
-                    )
-                )
-            except Exception:
-                pass
-        return result
+    def _to_roles_local(jobs: list[dict]) -> list[DiscoveredRole]:
+        return _to_roles(jobs, entry["name"], datetime.now(timezone.utc).isoformat())
 
-    def _merge_to_file(role_dicts: list[dict]) -> None:
-        """Upsert *role_dicts* into roles.json (dedup by URL, sort by score)."""
-        existing_data = store.read("roles.json") or {}
-        existing = [
-            DiscoveredRole.model_validate(r) for r in existing_data.get("roles", [])
-        ]
-        seen: dict[str, DiscoveredRole] = {r.url: r for r in existing}
-        for d in role_dicts:
-            try:
-                r = DiscoveredRole.model_validate(d)
-                if r.url:
-                    seen[r.url] = r
-            except Exception:
-                pass
-        final = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
-        store.write("roles.json", {**existing_data, "roles": [r.model_dump() for r in final]})
+    def _merge_local(role_dicts: list[dict]) -> None:
+        _merge_to_file(role_dicts, store)
 
     async def _filter_and_post(jobs: list[dict]) -> None:
         """Run LLM filter on *jobs* and post a filter_result event to the queue."""
@@ -340,7 +383,7 @@ async def stream_browser_fetch(
             return
         from jobfinder.roles.filters import filter_roles
 
-        roles_objs = _to_roles(jobs)
+        roles_objs = _to_roles_local(jobs)
         if not roles_objs:
             return
         try:
@@ -405,48 +448,65 @@ async def stream_browser_fetch(
                 # Merge filtered roles into roles.json on each filter_result
                 if event_type == "filter_result":
                     try:
-                        _merge_to_file(event.get("filtered", []))
+                        _merge_local(event.get("filtered", []))
                     except Exception:
                         pass
                     # Prune completed tasks from the tracking list
                     pending_filter_tasks = [t for t in pending_filter_tasks if not t.done()]
 
-                # Forward the event to the client
-                yield {"event": event_type, "data": json.dumps(event)}
+                # Non-terminal: forward to the client immediately
+                if event_type not in ("done", "killed", "error"):
+                    yield {"event": event_type, "data": json.dumps(event)}
+                    continue
 
-                # Terminal event: flush filter pipeline before ending the stream
-                if event_type in ("done", "killed", "error"):
-                    if pending_filter_tasks:
-                        await asyncio.gather(*pending_filter_tasks, return_exceptions=True)
-                        # Drain any filter_result events that landed after the terminal
-                        while not session.event_queue.empty():
-                            try:
-                                extra = session.event_queue.get_nowait()
-                                if extra.get("type") == "filter_result":
-                                    try:
-                                        _merge_to_file(extra.get("filtered", []))
-                                    except Exception:
-                                        pass
-                                    yield {
-                                        "event": "filter_result",
-                                        "data": json.dumps(extra),
-                                    }
-                            except asyncio.QueueEmpty:
-                                break
-
-                    # No filter configured: merge all collected partial roles at once
-                    if not config.role_filters and session.partial_roles:
-                        all_dicts = [
-                            r.model_dump()
-                            for r in _to_roles(session.partial_roles)
-                            if r.url
-                        ]
+                # ── Terminal event: flush filters → score → THEN yield ─────────
+                # 1. Flush any in-flight filter tasks and drain late filter_results
+                if pending_filter_tasks:
+                    await asyncio.gather(*pending_filter_tasks, return_exceptions=True)
+                    while not session.event_queue.empty():
                         try:
-                            _merge_to_file(all_dicts)
-                        except Exception:
-                            pass
+                            extra = session.event_queue.get_nowait()
+                            if extra.get("type") == "filter_result":
+                                try:
+                                    _merge_local(extra.get("filtered", []))
+                                except Exception:
+                                    pass
+                                yield {
+                                    "event": "filter_result",
+                                    "data": json.dumps(extra),
+                                }
+                        except asyncio.QueueEmpty:
+                            break
 
-                    break
+                # 2. No filter configured: merge all collected partial roles at once
+                if not config.role_filters and session.partial_roles:
+                    all_dicts = [
+                        r.model_dump()
+                        for r in _to_roles_local(session.partial_roles)
+                        if r.url
+                    ]
+                    try:
+                        _merge_local(all_dicts)
+                    except Exception:
+                        pass
+
+                # 3. Apply scoring (skip on "error" — roles may be incomplete)
+                if event_type != "error" and config.relevance_score_criteria:
+                    try:
+                        n_scored = await _score_browser_roles(entry["name"], config, store)
+                        if n_scored:
+                            yield {
+                                "event": "score_result",
+                                "data": json.dumps(
+                                    {"type": "score_result", "scored": n_scored}
+                                ),
+                            }
+                    except Exception:
+                        pass
+
+                # 4. Now yield the terminal event — client calls onDone() after scoring
+                yield {"event": event_type, "data": json.dumps(event)}
+                break
 
         finally:
             # Cancel any still-running filter tasks on exit
@@ -539,20 +599,11 @@ async def fetch_browser_roles(req: FetchBrowserRolesRequest, request: Request) -
         ) from exc
 
     # Merge new roles into roles.json (new wins on URL collision)
-    existing_data = store.read("roles.json") or {}
-    existing_roles = [
-        DiscoveredRole.model_validate(r) for r in existing_data.get("roles", [])
-    ]
-    seen: dict[str, DiscoveredRole] = {r.url: r for r in existing_roles}
-    for r in roles:
-        if r.url:
-            seen[r.url] = r
-    final_roles = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+    _merge_to_file([r.model_dump() for r in roles], store)
 
-    store.write(
-        "roles.json",
-        {**existing_data, "roles": [r.model_dump() for r in final_roles]},
-    )
+    # Apply relevance scoring to the newly stored roles
+    if config.relevance_score_criteria:
+        await _score_browser_roles(entry["name"], config, store)
 
     return {
         "company_name": entry["name"],

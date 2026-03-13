@@ -42,9 +42,9 @@ class AppConfig(BaseModel):
 
     # ── Browser agent settings (config.json only, not exposed in the UI) ──────
     # Hard time wall: agent is cancelled after this many minutes regardless of steps.
-    browser_agent_max_time_minutes: int = 7
+    browser_agent_max_time_minutes: int = 15
     # Step budget passed to browser-use Agent.run(max_steps=...).
-    browser_agent_max_steps: int = 50
+    browser_agent_max_steps: int = 100
     # Give up after this many consecutive 429 / rate-limit responses from the career page API.
     browser_agent_rate_limit_max_retries: int = 5
     # Initial back-off in seconds; doubles each consecutive rate-limit hit (capped at 120s).
