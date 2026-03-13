@@ -66,6 +66,11 @@ export async function getResume(): Promise<{ resumes: ParsedResume[] }> {
   return data;
 }
 
+export async function deleteResume(filename: string): Promise<{ resumes: ParsedResume[] }> {
+  const { data } = await api.delete<{ resumes: ParsedResume[] }>(`/resume/${encodeURIComponent(filename)}`);
+  return data;
+}
+
 // ─── Companies ────────────────────────────────────────────────────────────────
 
 export interface DiscoverCompaniesParams {

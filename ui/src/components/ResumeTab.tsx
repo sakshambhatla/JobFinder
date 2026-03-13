@@ -1,20 +1,33 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getResume, uploadResume, type ParsedResume } from "@/lib/api";
+import { getResume, uploadResume, deleteResume, type ParsedResume } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Trash2 } from "lucide-react";
 
-function ResumeCard({ resume }: { resume: ParsedResume }) {
+function ResumeCard({ resume, onDelete, deleting }: { resume: ParsedResume; onDelete: () => void; deleting: boolean }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">{resume.filename}</CardTitle>
-        <CardDescription>
-          {resume.years_of_experience != null
-            ? `~${resume.years_of_experience} years experience`
-            : ""}
-          {" · "}Parsed {new Date(resume.parsed_at).toLocaleDateString()}
-        </CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="text-base">{resume.filename}</CardTitle>
+            <CardDescription>
+              {resume.years_of_experience != null
+                ? `~${resume.years_of_experience} years experience`
+                : ""}
+              {" · "}Parsed {new Date(resume.parsed_at).toLocaleDateString()}
+            </CardDescription>
+          </div>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="shrink-0 p-1 rounded text-white/40 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+            title="Remove resume"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {resume.job_titles.length > 0 && (
@@ -67,6 +80,13 @@ export function ResumeTab() {
     },
     onError: (err: { response?: { data?: { detail?: string } }; message: string }) => {
       setError(err.response?.data?.detail ?? err.message);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: deleteResume,
+    onSuccess: (data) => {
+      qc.setQueryData(["resume"], data);
     },
   });
 
@@ -141,7 +161,14 @@ export function ResumeTab() {
           <h3 className="font-semibold text-sm text-white/50 uppercase tracking-wide">
             Parsed Resume
           </h3>
-          {resumes.map((r) => <ResumeCard key={r.filename} resume={r} />)}
+          {resumes.map((r) => (
+            <ResumeCard
+              key={r.filename}
+              resume={r}
+              onDelete={() => remove.mutate(r.filename)}
+              deleting={remove.isPending && remove.variables === r.filename}
+            />
+          ))}
         </div>
       )}
     </div>

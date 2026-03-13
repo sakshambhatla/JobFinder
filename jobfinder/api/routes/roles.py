@@ -386,9 +386,13 @@ async def stream_browser_fetch(
         roles_objs = _to_roles_local(jobs)
         if not roles_objs:
             return
+        # Browser-agent roles are scraped from HTML and rarely have posting dates.
+        # The agent already received the date-filter hint in its task prompt, so we
+        # skip posted_after here to avoid excluding every undated result.
+        filters_for_agent = config.role_filters.model_copy(update={"posted_after": None})
         try:
             filtered = await asyncio.to_thread(
-                filter_roles, roles_objs, config.role_filters, config
+                filter_roles, roles_objs, filters_for_agent, config
             )
         except Exception:
             return

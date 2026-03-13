@@ -51,3 +51,24 @@ async def get_resume() -> dict:
     if data is None:
         raise HTTPException(status_code=404, detail="No resume found. Upload one first.")
     return {"resumes": data}
+
+
+@router.delete("/resume/{filename}")
+async def delete_resume(filename: str) -> dict:
+    """Remove a resume entry from resumes.json and delete its .txt file if present."""
+    config = load_config()
+    store = StorageManager(config.data_dir)
+    data = store.read("resumes.json") or []
+
+    updated = [r for r in data if r.get("filename") != filename]
+    if len(updated) == len(data):
+        raise HTTPException(status_code=404, detail=f"Resume '{filename}' not found.")
+
+    store.write("resumes.json", updated)
+
+    # Best-effort: delete the .txt file if it still exists
+    txt_path = config.resume_dir / filename
+    if txt_path.exists():
+        txt_path.unlink()
+
+    return {"resumes": updated}

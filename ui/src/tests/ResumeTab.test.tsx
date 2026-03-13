@@ -13,6 +13,7 @@ import type { ParsedResume } from "@/lib/api";
 vi.mock("@/lib/api", () => ({
   getResume: vi.fn(),
   uploadResume: vi.fn(),
+  deleteResume: vi.fn(),
 }));
 
 import { getResume } from "@/lib/api";
