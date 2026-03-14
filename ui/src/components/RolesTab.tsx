@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useReactTable,
@@ -13,6 +13,7 @@ import {
   discoverRoles,
   killBrowserAgent,
   getRoles,
+  getUnfilteredRoles,
   getRolesCheckpoint,
   getCompanyRegistry,
   type BrowserAgentMetrics,
@@ -21,6 +22,7 @@ import {
   type RolesResponse,
   type CompanyRegistryEntry,
 } from "@/lib/api";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -144,6 +146,82 @@ function RolesTable({ roles }: { roles: DiscoveredRole[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ─── Pagination helpers ─────────────────────────────────────────────────────
+
+function PageSizeSelector({
+  pageSize,
+  setPageSize,
+}: {
+  pageSize: number;
+  setPageSize: (n: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-white/55">
+      <span>Show</span>
+      <select
+        value={pageSize}
+        onChange={(e) => setPageSize(Number(e.target.value))}
+        className="h-7 rounded-md px-2 py-0.5 text-xs text-white outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+        style={{
+          background: "rgba(255,255,255,0.10)",
+          border: "1px solid rgba(255,255,255,0.20)",
+        }}
+      >
+        <option value={20} style={{ background: "#1b4332", color: "white" }}>20</option>
+        <option value={50} style={{ background: "#1b4332", color: "white" }}>50</option>
+        <option value={100} style={{ background: "#1b4332", color: "white" }}>100</option>
+      </select>
+      <span>per page</span>
+    </div>
+  );
+}
+
+function PaginationControls({
+  page,
+  setPage,
+  totalItems,
+  pageSize,
+}: {
+  page: number;
+  setPage: (n: number) => void;
+  totalItems: number;
+  pageSize: number;
+}) {
+  const totalPages = Math.ceil(totalItems / pageSize);
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-center gap-4 pt-4">
+      <button
+        disabled={page <= 1}
+        onClick={() => setPage(page - 1)}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        style={{
+          background: "rgba(255,255,255,0.10)",
+          border: "1px solid rgba(255,255,255,0.20)",
+          color: "rgba(255,255,255,0.75)",
+        }}
+      >
+        ← Previous
+      </button>
+      <span className="text-sm text-white/60 tabular-nums">
+        Page {page} of {totalPages}
+      </span>
+      <button
+        disabled={page >= totalPages}
+        onClick={() => setPage(page + 1)}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        style={{
+          background: "rgba(255,255,255,0.10)",
+          border: "1px solid rgba(255,255,255,0.20)",
+          color: "rgba(255,255,255,0.75)",
+        }}
+      >
+        Next →
+      </button>
     </div>
   );
 }
@@ -612,6 +690,18 @@ export function RolesTab() {
   const [useCache, setUseCache] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Pagination & tab state
+  const [activeTab, setActiveTab] = useState<string>("all");
+  const [allRolesPage, setAllRolesPage] = useState(1);
+  const [filteredPage, setFilteredPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // Reset pages when pageSize changes
+  useEffect(() => {
+    setAllRolesPage(1);
+    setFilteredPage(1);
+  }, [pageSize]);
+
   const { data: cached } = useQuery({
     queryKey: ["roles"],
     queryFn: getRoles,
@@ -659,6 +749,7 @@ export function RolesTab() {
     onSuccess: (data) => {
       qc.setQueryData(["roles"], data);
       qc.setQueryData(["roles-checkpoint"], null);
+      qc.invalidateQueries({ queryKey: ["roles-unfiltered"] });
       setError(null);
     },
     onError: (err: { response?: { data?: { detail?: string } }; message: string }) => {
@@ -669,9 +760,24 @@ export function RolesTab() {
     },
   });
 
+  // Poll for unfiltered roles while discovery is pending
+  const { data: unfilteredData } = useQuery({
+    queryKey: ["roles-unfiltered"],
+    queryFn: getUnfilteredRoles,
+    retry: false,
+    refetchInterval: discover.isPending ? 3000 : false,
+  });
+
   const result = discover.data ?? cached;
-  const roles = result?.roles ?? [];
-  const flagged = result?.flagged_companies ?? [];
+  const filteredRoles = result?.roles ?? [];
+  const allRoles = unfilteredData?.roles ?? [];
+  const flagged = result?.flagged_companies ?? unfilteredData?.flagged_companies ?? [];
+
+  // Paginated slices
+  const paginatedAll = allRoles.slice((allRolesPage - 1) * pageSize, allRolesPage * pageSize);
+  const paginatedFiltered = filteredRoles.slice((filteredPage - 1) * pageSize, filteredPage * pageSize);
+
+  const showResults = discover.isPending || result || unfilteredData;
 
   return (
     <div className="space-y-6">
@@ -802,42 +908,112 @@ export function RolesTab() {
         </CardContent>
       </Card>
 
-      {discover.isPending && (
-        <div className="flex flex-col items-center gap-3 py-12 text-white/55">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/40 border-t-white/80" />
-          <p className="text-sm">Fetching roles from company career pages…</p>
-          <p className="text-xs text-white/40">This may take 30–90 seconds</p>
-        </div>
-      )}
-
       {error && (
         <p className="text-sm text-red-300 bg-red-500/15 border border-red-400/25 rounded-lg px-4 py-2">{error}</p>
       )}
 
-      {!discover.isPending && result && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h3 className="font-semibold text-sm text-white/50 uppercase tracking-wide">
-              {roles.length} Roles
-            </h3>
-            {result.total_roles !== result.roles_after_filter && (
-              <Badge className="text-xs bg-white/10 text-white/60 border border-white/20">
-                {result.roles_after_filter} of {result.total_roles} after filter
-              </Badge>
-            )}
-            <Badge className="text-xs bg-white/10 text-white/60 border border-white/20">
-              {discover.data ? "Fresh" : "Cached"}
-            </Badge>
-          </div>
-          {roles.length > 0 ? <RolesTable roles={roles} /> : (
-            <p className="text-white/45 text-sm py-8 text-center">
-              No roles matched your filters.
-            </p>
+      {showResults && (
+        <div className="space-y-6">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as string)}>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <TabsList>
+                <TabsTrigger value="all">
+                  All Roles
+                  {allRoles.length > 0 && (
+                    <Badge className="ml-2 text-[10px] bg-white/10 text-white/60 border border-white/20">
+                      {allRoles.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="filtered">
+                  Filtered
+                  {filteredRoles.length > 0 && (
+                    <Badge className="ml-2 text-[10px] bg-white/10 text-white/60 border border-white/20">
+                      {filteredRoles.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+              <PageSizeSelector pageSize={pageSize} setPageSize={setPageSize} />
+            </div>
+
+            <TabsContent value="all" className="mt-4">
+              {discover.isPending && !unfilteredData ? (
+                <div className="flex flex-col items-center gap-3 py-12 text-white/55">
+                  <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/40 border-t-white/80" />
+                  <p className="text-sm">Fetching roles from company career pages…</p>
+                  <p className="text-xs text-white/40">This may take 30–90 seconds</p>
+                </div>
+              ) : allRoles.length > 0 ? (
+                <>
+                  <RolesTable roles={paginatedAll} />
+                  <PaginationControls
+                    page={allRolesPage}
+                    setPage={setAllRolesPage}
+                    totalItems={allRoles.length}
+                    pageSize={pageSize}
+                  />
+                </>
+              ) : (
+                <p className="text-white/45 text-sm py-8 text-center">
+                  No roles found. Run discovery to fetch roles.
+                </p>
+              )}
+            </TabsContent>
+
+            <TabsContent value="filtered" className="mt-4">
+              {discover.isPending ? (
+                <div className="flex flex-col items-center gap-3 py-12 text-white/55">
+                  <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/40 border-t-white/80" />
+                  <p className="text-sm">Filtering and scoring roles…</p>
+                  <p className="text-xs text-white/40">LLM is evaluating each role against your criteria</p>
+                </div>
+              ) : filteredRoles.length > 0 ? (
+                <>
+                  <div className="flex items-center gap-3 flex-wrap mb-3">
+                    {result && result.total_roles !== result.roles_after_filter && (
+                      <Badge className="text-xs bg-white/10 text-white/60 border border-white/20">
+                        {result.roles_after_filter} of {result.total_roles} after filter
+                      </Badge>
+                    )}
+                    <Badge className="text-xs bg-white/10 text-white/60 border border-white/20">
+                      {discover.data ? "Fresh" : "Cached"}
+                    </Badge>
+                  </div>
+                  <RolesTable roles={paginatedFiltered} />
+                  <PaginationControls
+                    page={filteredPage}
+                    setPage={setFilteredPage}
+                    totalItems={filteredRoles.length}
+                    pageSize={pageSize}
+                  />
+                </>
+              ) : result ? (
+                <p className="text-white/45 text-sm py-8 text-center">
+                  No roles matched your filters.
+                </p>
+              ) : (
+                <p className="text-white/45 text-sm py-8 text-center">
+                  Run discovery to see filtered results.
+                </p>
+              )}
+            </TabsContent>
+          </Tabs>
+
+          {/* Browser Agent — visually separated section */}
+          {flagged.length > 0 && (
+            <div className="space-y-3">
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="font-semibold text-sm text-white/50 uppercase tracking-wide mb-3">
+                  Browser Agent Fallback
+                </h3>
+              </div>
+              <FlaggedBox
+                flagged={flagged}
+                onDone={() => qc.invalidateQueries({ queryKey: ["roles"] })}
+              />
+            </div>
           )}
-          <FlaggedBox
-            flagged={flagged}
-            onDone={() => qc.invalidateQueries({ queryKey: ["roles"] })}
-          />
         </div>
       )}
     </div>

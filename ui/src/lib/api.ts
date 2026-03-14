@@ -146,6 +146,11 @@ export async function getRoles(): Promise<RolesResponse> {
   return data;
 }
 
+export async function getUnfilteredRoles(): Promise<RolesResponse> {
+  const { data } = await api.get<RolesResponse>("/roles/unfiltered");
+  return data;
+}
+
 export async function getRolesCheckpoint(): Promise<RolesCheckpoint | null> {
   try {
     const { data } = await api.get<RolesCheckpoint>("/roles/checkpoint");

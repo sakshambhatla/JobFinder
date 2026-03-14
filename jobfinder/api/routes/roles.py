@@ -195,6 +195,17 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
         resume_filter_kept = []
         resume_score_batches = 0
 
+    # ── Persist unfiltered snapshot so the UI can show "All Roles" early ─────
+    unfiltered_output = {
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "total_roles": len(roles),
+        "companies_fetched": len(companies) - len(flagged_dicts),
+        "companies_flagged": len(flagged_dicts),
+        "flagged_companies": flagged_dicts,
+        "roles": [r.model_dump() for r in roles],
+    }
+    store.write("roles_unfiltered.json", unfiltered_output)
+
     # ── Filter ────────────────────────────────────────────────────────────────
 
     filtered_roles = roles
@@ -271,6 +282,17 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
     cp.delete()
 
     return output
+
+
+@router.get("/roles/unfiltered")
+async def get_unfiltered_roles() -> dict:
+    """Return raw/unfiltered role discovery results."""
+    config = load_config()
+    store = StorageManager(config.data_dir)
+    data = store.read("roles_unfiltered.json")
+    if data is None:
+        raise HTTPException(status_code=404, detail="No unfiltered roles found.")
+    return data
 
 
 @router.get("/roles/checkpoint")

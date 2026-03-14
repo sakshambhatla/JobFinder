@@ -19,6 +19,7 @@ vi.mock("@/lib/api", () => ({
   getCompanyRegistry: vi.fn().mockRejectedValue({ response: { status: 404 } }),
   discoverRoles: vi.fn(),
   getRoles: vi.fn().mockRejectedValue({ response: { status: 404 } }),
+  getUnfilteredRoles: vi.fn().mockRejectedValue({ response: { status: 404 } }),
   getRolesCheckpoint: vi.fn().mockRejectedValue({ response: { status: 404 } }),
   fetchBrowserRoles: vi.fn(),
   browserAgentStreamUrl: vi.fn().mockReturnValue("/api/roles/fetch-browser/stream"),
