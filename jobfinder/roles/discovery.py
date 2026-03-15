@@ -109,15 +109,22 @@ def discover_roles(
         + "[/dim]"
     )
 
-    # ── Pass 2: career page supplemental fetch ───────────────────────────────
-    _has_career_pages = any(c.career_page_url for c in companies)
-    if _has_career_pages:
-        log(
-            "\n[bold]Pass 2 — Career page supplement[/bold]: "
-            "rendering pages with Playwright and extracting roles with LLM..."
-        )
+    # ── Pass 2: career page fallback ─────────────────────────────────────────
+    # Only run for companies where ATS failed — career page is a fallback, not
+    # a supplement. Companies with working ATS feeds (Greenhouse/Lever/Ashby)
+    # already have complete data; re-fetching via Playwright wastes time.
     existing_urls: set[str] = {r.url for r in all_roles if r.url}
     flagged_names: set[str] = {f.name.lower() for f in flagged}
+
+    _flagged_with_pages = [
+        c for c in companies
+        if c.name.lower() in flagged_names and c.career_page_url
+    ]
+    if _flagged_with_pages:
+        log(
+            "\n[bold]Pass 2 — Career page fallback[/bold]: "
+            "rendering pages with Playwright and extracting roles with LLM..."
+        )
 
     for company in companies:
         if not company.career_page_url:
@@ -129,11 +136,14 @@ def discover_roles(
             continue
 
         is_fallback = company.name.lower() in flagged_names
-        if is_fallback:
-            log(
-                f"  [yellow]↳ ATS failed — trying career page for {company.name}...[/yellow]",
-                level="warning",
-            )
+        if not is_fallback:
+            # ATS succeeded — skip career page entirely
+            continue
+
+        log(
+            f"  [yellow]↳ ATS failed — trying career page for {company.name}...[/yellow]",
+            level="warning",
+        )
 
         # Cache check for career page
         if use_cache:
@@ -186,12 +196,6 @@ def discover_roles(
                     display_warning(
                         f"{company.name}: career page returned no roles — "
                         f"try 'Fetch via Browser Agent' for agentic extraction"
-                    )
-                else:
-                    # ATS succeeded and career page added nothing new — clarify impact
-                    log(
-                        f"  [dim]{company.name}: career page check found no new roles "
-                        f"(ATS feed appears complete)[/dim]"
                     )
             except Exception as exc:
                 if is_fallback:
