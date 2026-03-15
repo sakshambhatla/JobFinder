@@ -50,6 +50,7 @@ export interface RolesResponse {
   companies_flagged: number;
   flagged_companies: FlaggedCompany[];
   roles: DiscoveredRole[];
+  in_progress?: boolean;
 }
 
 // ─── Resume ───────────────────────────────────────────────────────────────────

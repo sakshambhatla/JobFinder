@@ -946,6 +946,12 @@ export function RolesTab() {
                 </div>
               ) : allRoles.length > 0 ? (
                 <>
+                  {unfilteredData?.in_progress && (
+                    <div className="flex items-center gap-2 mb-3 text-white/55 text-sm">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white/80 shrink-0" />
+                      <span>Fetching more roles… ({allRoles.length} found so far)</span>
+                    </div>
+                  )}
                   <RolesTable roles={paginatedAll} />
                   <PaginationControls
                     page={allRolesPage}

@@ -170,9 +170,26 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
 
         # --refresh overrides --use-cache: a fresh fetch always wins
         effective_use_cache = req.use_cache and not req.refresh
+
+        def _on_progress(
+            current_roles: list[DiscoveredRole],
+            current_flagged: list,
+        ) -> None:
+            """Write incremental unfiltered snapshot so the UI can poll it."""
+            flagged_dicts_snap = [f.model_dump() for f in current_flagged]
+            store.write("roles_unfiltered.json", {
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "total_roles": len(current_roles),
+                "companies_fetched": len(companies) - len(flagged_dicts_snap),
+                "companies_flagged": len(flagged_dicts_snap),
+                "flagged_companies": flagged_dicts_snap,
+                "roles": [r.model_dump() for r in current_roles],
+                "in_progress": True,
+            })
+
         try:
             roles, flagged = await asyncio.to_thread(
-                discover_roles, companies, config, effective_use_cache
+                discover_roles, companies, config, effective_use_cache, _on_progress
             )
         except Exception as exc:
             raise HTTPException(
@@ -195,7 +212,7 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
         resume_filter_kept = []
         resume_score_batches = 0
 
-    # ── Persist unfiltered snapshot so the UI can show "All Roles" early ─────
+    # ── Persist final unfiltered snapshot ─────────────────────────────────────
     unfiltered_output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "total_roles": len(roles),
@@ -203,6 +220,7 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
         "companies_flagged": len(flagged_dicts),
         "flagged_companies": flagged_dicts,
         "roles": [r.model_dump() for r in roles],
+        "in_progress": False,
     }
     store.write("roles_unfiltered.json", unfiltered_output)
 

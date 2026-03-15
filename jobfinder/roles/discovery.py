@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 from jobfinder.config import AppConfig
 from jobfinder.roles.ats import get_fetcher
 from jobfinder.roles.ats.base import ATSFetchError, UnsupportedATSError
@@ -11,11 +14,15 @@ from jobfinder.storage.store import StorageManager
 from jobfinder.utils.display import console, display_warning
 from jobfinder.utils.log_stream import log
 
+if TYPE_CHECKING:
+    ProgressCallback = Callable[[list[DiscoveredRole], list[FlaggedCompany]], None]
+
 
 def discover_roles(
     companies: list[DiscoveredCompany],
     config: AppConfig,
     use_cache: bool = False,
+    on_progress: ProgressCallback | None = None,
 ) -> tuple[list[DiscoveredRole], list[FlaggedCompany]]:
     """Fetch roles from all companies. Returns (roles, flagged_companies).
 
@@ -52,6 +59,8 @@ def discover_roles(
                     f"  [dim]{company.name}[/dim]: "
                     f"{len(cached)} roles (cached {age:.0f}h ago)"
                 )
+                if on_progress:
+                    on_progress(all_roles, flagged)
                 continue
 
         fetcher = get_fetcher(company.ats_type)
@@ -66,6 +75,8 @@ def discover_roles(
                     f"via [cyan]{company.ats_type.upper()}[/cyan] API",
                     level="success",
                 )
+                if on_progress:
+                    on_progress(all_roles, flagged)
             except UnsupportedATSError:
                 flagged.append(
                     FlaggedCompany(
@@ -162,6 +173,8 @@ def discover_roles(
                     flagged = [f for f in flagged if f.name.lower() != company.name.lower()]
                     flagged_names.discard(company.name.lower())
                 update_registry_searchable(store, company.name, bool(cached_cp))
+                if on_progress:
+                    on_progress(all_roles, flagged)
                 continue
 
         with console.status(f"Checking career page for {company.name}..."):
@@ -186,12 +199,16 @@ def discover_roles(
                         f"({len(cp_roles)} roles, {len(new_roles)} new)",
                         level="success",
                     )
+                    if on_progress:
+                        on_progress(all_roles, flagged)
                 elif new_roles:
                     log(
                         f"  [green]✓ {company.name}[/green]: "
                         f"{len(new_roles)} additional roles via career page",
                         level="success",
                     )
+                    if on_progress:
+                        on_progress(all_roles, flagged)
                 elif is_fallback and not cp_roles:
                     display_warning(
                         f"{company.name}: career page returned no roles — "
