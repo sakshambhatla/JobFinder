@@ -35,3 +35,4 @@ ui/dist/
 local.patch
 security-concerns.md
 plans/
+supabase/.temp/
