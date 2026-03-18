@@ -180,6 +180,13 @@ def filter_roles(
         resume_batches: Skip this many already-processed batches (used when resuming).
         resume_kept: Roles already matched in previously completed batches.
     """
+    # ── Short-circuit to local filter for non-LLM strategies ─────────────────
+    strategy = getattr(filters, "filter_strategy", "llm")
+    if strategy in ("fuzzy", "semantic"):
+        from jobfinder.roles.local_filters import filter_roles_local
+        return filter_roles_local(roles, filters)
+
+    # ── LLM filter (original behaviour below) ─────────────────────────────────
     active = {k: v for k, v in filters.model_dump().items() if v is not None}
     if not active:
         return roles

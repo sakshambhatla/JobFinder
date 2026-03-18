@@ -206,7 +206,7 @@ function App() {
           <TabsContent value="roles">
             <RolesTab />
           </TabsContent>
-          <DebugLogPanel />
+          {mode === "local" && <DebugLogPanel />}
         </main>
       </Tabs>
 

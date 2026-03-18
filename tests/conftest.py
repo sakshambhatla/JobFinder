@@ -52,6 +52,7 @@ def client(tmp_data_dir: Path):
     """
     import jobfinder.api.routes.resume
     import jobfinder.api.routes.companies
+    import jobfinder.api.routes.company_runs
     import jobfinder.api.routes.roles
     from jobfinder.config import AppConfig
     from jobfinder.storage.store import StorageManager
@@ -76,6 +77,7 @@ def client(tmp_data_dir: Path):
     route_modules = (
         jobfinder.api.routes.resume,
         jobfinder.api.routes.companies,
+        jobfinder.api.routes.company_runs,
         jobfinder.api.routes.roles,
     )
     for mod in route_modules:
@@ -86,7 +88,6 @@ def client(tmp_data_dir: Path):
 
     with TestClient(app) as c:
         # Seed app state
-        app.state.registry = []
         app.state.running_agents = {}
         yield c
 

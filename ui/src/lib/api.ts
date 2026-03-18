@@ -30,6 +30,7 @@ api.interceptors.response.use(
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ParsedResume {
+  id: string;
   filename: string;
   skills: string[];
   job_titles: string[];
@@ -45,6 +46,33 @@ export interface DiscoveredCompany {
   career_page_url: string;
   ats_type: string;
   discovered_at: string;
+}
+
+export interface CompanyRunSummary {
+  id: string;
+  run_name: string;
+  source_type: "resume" | "seed";
+  source_id: string;
+  company_count: number;
+  created_at: string;
+}
+
+export interface CompanyRun {
+  id: string;
+  run_name: string;
+  source_type: "resume" | "seed";
+  source_id: string;
+  seed_companies: string[] | null;
+  companies: DiscoveredCompany[];
+  created_at: string;
+}
+
+export interface CompanyRunsPage {
+  runs: CompanyRunSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface DiscoveredRole {
@@ -103,15 +131,38 @@ export interface DiscoverCompaniesParams {
   max_companies?: number;
   model_provider?: string;
   seed_companies?: string[];
+  resume_id?: string;
+}
+
+export interface DiscoverCompaniesResponse {
+  companies: DiscoveredCompany[];
+  run_id: string;
+  run_name: string;
+  discovered_at: string;
 }
 
 export async function discoverCompanies(
   params: DiscoverCompaniesParams
-): Promise<{ companies: DiscoveredCompany[] }> {
-  const { data } = await api.post<{ companies: DiscoveredCompany[] }>(
+): Promise<DiscoverCompaniesResponse> {
+  const { data } = await api.post<DiscoverCompaniesResponse>(
     "/companies/discover",
     params
   );
+  return data;
+}
+
+export async function getCompanyRuns(
+  page = 1,
+  pageSize = 10
+): Promise<CompanyRunsPage> {
+  const { data } = await api.get<CompanyRunsPage>("/company-runs", {
+    params: { page, page_size: pageSize },
+  });
+  return data;
+}
+
+export async function getCompanyRun(runId: string): Promise<CompanyRun> {
+  const { data } = await api.get<CompanyRun>(`/company-runs/${encodeURIComponent(runId)}`);
   return data;
 }
 
@@ -140,16 +191,19 @@ export interface RoleFiltersParams {
   posted_after?: string;
   location?: string;
   confidence?: string;
+  filter_strategy?: "llm" | "fuzzy" | "semantic";
 }
 
 export interface DiscoverRolesParams {
   company_names?: string[];
+  company_run_id?: string;
   refresh?: boolean;
   resume?: boolean;
   use_cache?: boolean;
   role_filters?: RoleFiltersParams;
   relevance_score_criteria?: string;
   model_provider?: string;
+  skip_career_page?: boolean;
 }
 
 export interface RolesCheckpoint {

@@ -122,6 +122,12 @@ class SupabaseStorageBackend:
                 "exists": self._exists_api_profiles,
                 "delete": self._delete_api_profiles,
             },
+            "company_runs.json": {
+                "read": self._read_company_runs,
+                "write": self._write_company_runs,
+                "exists": self._exists_company_runs,
+                "delete": self._delete_company_runs,
+            },
         }
         return handlers.get(collection)
 
@@ -143,18 +149,19 @@ class SupabaseStorageBackend:
         resumes = data if isinstance(data, list) else data.get("resumes", data)
         if not isinstance(resumes, list):
             return
-        # Clear existing, then insert
+        # Clear existing, then insert (multi-resume: one row per file)
         self._client.table("resumes").delete().eq("user_id", self._user_id).execute()
         for r in resumes:
             row = {
                 "user_id": self._user_id,
+                "resume_id": r.get("id") or r.get("resume_id"),
                 "filename": r.get("filename", ""),
                 "full_text": r.get("full_text", ""),
                 "skills": r.get("skills", []),
                 "job_titles": r.get("job_titles", []),
                 "parsed_at": r.get("parsed_at", datetime.now(timezone.utc).isoformat()),
             }
-            self._client.table("resumes").upsert(row, on_conflict="user_id").execute()
+            self._client.table("resumes").insert(row).execute()
 
     def _exists_resumes(self) -> bool:
         resp = (
@@ -171,6 +178,7 @@ class SupabaseStorageBackend:
     @staticmethod
     def _row_to_resume(row: dict) -> dict:
         return {
+            "id": row.get("resume_id") or row.get("id", ""),
             "filename": row["filename"],
             "full_text": row.get("full_text", ""),
             "sections": {},
@@ -516,3 +524,59 @@ class SupabaseStorageBackend:
     def _delete_api_profiles(self) -> None:
         # Shared table — delete all (admin only, rarely used)
         self._client.table("api_profiles").delete().neq("id", "").execute()
+
+    # ── Company Runs ───────────────────────────────────────────────────────────
+
+    def _read_company_runs(self) -> list | None:
+        resp = (
+            self._client.table("company_runs")
+            .select("*")
+            .eq("user_id", self._user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if not resp.data:
+            return None
+        return [self._row_to_company_run(r) for r in resp.data]
+
+    def _write_company_runs(self, data: list) -> None:
+        if not isinstance(data, list):
+            return
+        # Delete-and-reinsert to keep order and enforce limits upstream
+        self._client.table("company_runs").delete().eq("user_id", self._user_id).execute()
+        for run in data:
+            row = {
+                "id": run.get("id"),
+                "user_id": self._user_id,
+                "run_name": run.get("run_name", ""),
+                "source_type": run.get("source_type", "resume"),
+                "source_id": run.get("source_id", ""),
+                "seed_companies": run.get("seed_companies"),
+                "companies": run.get("companies", []),
+                "created_at": run.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            }
+            self._client.table("company_runs").upsert(row, on_conflict="id").execute()
+
+    def _exists_company_runs(self) -> bool:
+        resp = (
+            self._client.table("company_runs")
+            .select("id", count="exact")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        return (resp.count or 0) > 0
+
+    def _delete_company_runs(self) -> None:
+        self._client.table("company_runs").delete().eq("user_id", self._user_id).execute()
+
+    @staticmethod
+    def _row_to_company_run(row: dict) -> dict:
+        return {
+            "id": row["id"],
+            "run_name": row.get("run_name", ""),
+            "source_type": row.get("source_type", "resume"),
+            "source_id": row.get("source_id", ""),
+            "seed_companies": row.get("seed_companies"),
+            "companies": row.get("companies", []),
+            "created_at": row.get("created_at", ""),
+        }

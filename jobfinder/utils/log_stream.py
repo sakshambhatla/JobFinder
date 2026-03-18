@@ -1,6 +1,11 @@
-"""Centralized log capture — writes to Rich console, log file, and SSE ring buffer."""
+"""Centralized log capture — writes to Rich console, log file, and SSE ring buffer.
+
+The SSE ring buffer is skipped in managed mode (SUPABASE_URL set) since the
+log stream endpoint is disabled to prevent cross-user data leakage.
+"""
 from __future__ import annotations
 
+import os
 import re
 import threading
 from collections import deque
@@ -72,16 +77,17 @@ def log(message: str, level: str = "info") -> None:
             with open(_log_file_path, "a") as f:
                 f.write(f"[{timestamp}] [{level.upper()}] {plain}\n")
 
-    # 4. Push to ring buffer (thread-safe)
-    with _log_lock:
-        entry = {
-            "seq": _log_counter,
-            "timestamp": timestamp,
-            "level": level,
-            "message": plain,
-        }
-        _log_buffer.append(entry)
-        _log_counter += 1
+    # 4. Push to ring buffer (thread-safe) — skip in managed mode
+    if not os.environ.get("SUPABASE_URL"):
+        with _log_lock:
+            entry = {
+                "seq": _log_counter,
+                "timestamp": timestamp,
+                "level": level,
+                "message": plain,
+            }
+            _log_buffer.append(entry)
+            _log_counter += 1
 
 
 def get_logs_since(seq: int) -> tuple[list[dict], int]:

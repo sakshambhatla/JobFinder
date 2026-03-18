@@ -145,7 +145,7 @@ export function ResumeTab() {
               <p className="font-medium text-white">Drop your resume here</p>
               <p className="text-sm text-white/55">or click to browse — .txt files only</p>
               <p className="text-xs text-white/40 mt-1">
-                Uploading replaces any existing resume
+                Multiple resumes supported — each upload adds to your list
               </p>
             </div>
           </>

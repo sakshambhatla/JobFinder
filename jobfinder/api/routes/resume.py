@@ -18,9 +18,8 @@ async def upload_resume(
     file: UploadFile,
     user_id: str | None = Depends(get_current_user),
 ) -> dict:
-    """Upload a .txt resume file. Clears the resume directory first."""
+    """Upload a .txt resume file. Appends to existing resumes (multi-resume)."""
     # Sanitize: strip any directory components to prevent path traversal.
-    # e.g. "../../etc/passwd.txt" → "passwd.txt"
     safe_filename = Path(file.filename or "").name
     if not safe_filename or not safe_filename.endswith(".txt"):
         raise HTTPException(status_code=400, detail="Only .txt resume files are supported.")
@@ -33,21 +32,32 @@ async def upload_resume(
     resume_dir = config.resume_dir
     resume_dir.mkdir(parents=True, exist_ok=True)
 
-    # Clear existing .txt files (single-resume mode)
-    for existing in resume_dir.glob("*.txt"):
-        existing.unlink()
-
-    # Save the uploaded file using the sanitized name
+    # Save the uploaded file (overwrites if same filename exists)
     dest = resume_dir / safe_filename
     dest.write_bytes(content)
 
-    # Parse in a thread (file I/O + regex, not CPU-heavy but keeps event loop free)
-    resumes = await asyncio.to_thread(parse_resumes, resume_dir)
+    # Parse ALL resumes in the directory (multi-resume mode)
+    all_parsed = await asyncio.to_thread(parse_resumes, resume_dir)
 
     store = get_storage_backend(user_id)
-    store.write("resumes.json", [r.model_dump() for r in resumes])
 
-    return {"resumes": [r.model_dump() for r in resumes]}
+    # Preserve existing resume IDs for files that haven't changed
+    existing_data = store.read("resumes.json") or []
+    existing_by_filename: dict[str, dict] = {}
+    if isinstance(existing_data, list):
+        for r in existing_data:
+            existing_by_filename[r.get("filename", "")] = r
+
+    result = []
+    for r in all_parsed:
+        dumped = r.model_dump()
+        # Reuse existing UUID if this filename was already uploaded
+        if r.filename in existing_by_filename:
+            dumped["id"] = existing_by_filename[r.filename].get("id", dumped["id"])
+        result.append(dumped)
+
+    store.write("resumes.json", result)
+    return {"resumes": result}
 
 
 @router.get("/resume")

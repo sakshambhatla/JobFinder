@@ -125,6 +125,10 @@ def discover_roles(
     # Only run for companies where ATS failed — career page is a fallback, not
     # a supplement. Companies with working ATS feeds (Greenhouse/Lever/Ashby)
     # already have complete data; re-fetching via Playwright wastes time.
+    if config.skip_career_page:
+        log("\n[dim]Pass 2 skipped (API-only mode — career page fallback disabled)[/dim]")
+        return all_roles, flagged
+
     existing_urls: set[str] = {r.url for r in all_roles if r.url}
     flagged_names: set[str] = {f.name.lower() for f in flagged}
 

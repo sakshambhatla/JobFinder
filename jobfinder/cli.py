@@ -212,6 +212,12 @@ def discover_companies(
     default=False,
     help="Re-use cached roles (TTL: 2 days) per company+ATS instead of re-fetching",
 )
+@click.option(
+    "--skip-career-page",
+    is_flag=True,
+    default=False,
+    help="Skip Playwright career-page fallback (Pass 2). Return ATS API results only.",
+)
 @click.pass_context
 def discover_roles_cmd(
     ctx: click.Context,
@@ -219,6 +225,7 @@ def discover_roles_cmd(
     refresh: bool,
     resume: bool,
     use_cache: bool,
+    skip_career_page: bool,
 ) -> None:
     """Read open roles from discovered companies' career pages via public ATS APIs."""
     from jobfinder.roles.checkpoint import CHECKPOINT_FILENAME, Checkpoint
@@ -226,7 +233,7 @@ def discover_roles_cmd(
     from jobfinder.roles.errors import RateLimitError
     from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole
 
-    config = load_config(ctx.obj["config_path"])
+    config = load_config(ctx.obj["config_path"], skip_career_page=skip_career_page or None)
     store = StorageManager(config.data_dir)
     cp = Checkpoint(store)
 

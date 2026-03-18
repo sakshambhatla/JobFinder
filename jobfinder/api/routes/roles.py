@@ -13,6 +13,7 @@ from jobfinder.roles.discovery import discover_roles
 from jobfinder.roles.errors import RateLimitError
 from jobfinder.storage import get_storage_backend
 from jobfinder.storage.backend import StorageBackend
+from jobfinder.storage.registry import load_or_bootstrap_registry
 from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole
 
 router = APIRouter()
@@ -118,22 +119,42 @@ async def discover_roles_endpoint(
         overrides["relevance_score_criteria"] = req.relevance_score_criteria
     if req.role_filters is not None:
         overrides["role_filters"] = req.role_filters.model_dump()
+    if req.skip_career_page is not None:
+        overrides["skip_career_page"] = req.skip_career_page
 
     config = load_config(**overrides)
     store = get_storage_backend(user_id)
     cp = _make_checkpoint(store)
 
     companies_data = store.read("companies.json")
-    # Require companies.json only when not using registry selection and not resuming
-    if companies_data is None and not req.company_names and not (req.resume and cp.exists()):
+
+    # Resolve company_run_id → company_names (if provided)
+    effective_company_names = req.company_names
+    if req.company_run_id and not effective_company_names:
+        all_runs: list[dict] = store.read("company_runs.json") or []
+        matched_run = next((r for r in all_runs if r.get("id") == req.company_run_id), None)
+        if matched_run is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Company run '{req.company_run_id}' not found.",
+            )
+        effective_company_names = [c["name"] for c in matched_run.get("companies", [])]
+
+    # Require companies.json only when not using explicit selection and not resuming
+    if companies_data is None and not effective_company_names and not (req.resume and cp.exists()):
         raise HTTPException(
             status_code=400,
             detail="No companies found. Run company discovery first.",
         )
     companies_data = companies_data or {}
 
-    # Ensure API key is present if LLM features are needed
-    if config.role_filters or config.relevance_score_criteria:
+    # Ensure API key is present if LLM features are needed.
+    # Skip the check when using local (fuzzy/semantic) filtering — no API calls needed.
+    _local_strategy = (
+        config.role_filters is not None
+        and getattr(config.role_filters, "filter_strategy", "llm") in ("fuzzy", "semantic")
+    )
+    if (config.role_filters and not _local_strategy) or config.relevance_score_criteria:
         try:
             require_api_key(config.model_provider)
         except SystemExit as exc:
@@ -155,11 +176,11 @@ async def discover_roles_endpoint(
         resume_score_batches = cp.score_batches_done
     else:
         # Fresh run — resolve companies from registry or last-run file
-        if req.company_names:
-            registry: list[dict] = request.app.state.registry
+        if effective_company_names:
+            registry: list[dict] = load_or_bootstrap_registry(store)
             reg_map = {e["name"].lower(): e for e in registry}
-            selected = [reg_map[n.lower()] for n in req.company_names if n.lower() in reg_map]
-            missing = [n for n in req.company_names if n.lower() not in reg_map]
+            selected = [reg_map[n.lower()] for n in effective_company_names if n.lower() in reg_map]
+            missing = [n for n in effective_company_names if n.lower() not in reg_map]
             if missing:
                 raise HTTPException(
                     status_code=404,
@@ -386,7 +407,7 @@ async def stream_browser_fetch(
 
     # ── Registry lookup ───────────────────────────────────────────────────────
 
-    registry: list[dict] = request.app.state.registry
+    registry: list[dict] = load_or_bootstrap_registry(store)
     reg_map = {e["name"].lower(): e for e in registry}
     entry = reg_map.get(company_name.lower())
     if entry is None:
@@ -412,7 +433,7 @@ async def stream_browser_fetch(
         kill_event=asyncio.Event(),
         metrics=AgentMetrics(company_name=entry["name"]),
     )
-    request.app.state.running_agents[entry["name"]] = session
+    request.app.state.running_agents[(user_id, entry["name"])] = session
 
     # ── Local helpers (thin wrappers that bind entry / store / session) ─────────
 
@@ -562,7 +583,7 @@ async def stream_browser_fetch(
             for t in pending_filter_tasks:
                 if not t.done():
                     t.cancel()
-            request.app.state.running_agents.pop(entry["name"], None)
+            request.app.state.running_agents.pop((user_id, entry["name"]), None)
 
     return EventSourceResponse(event_generator())
 
@@ -579,13 +600,13 @@ async def kill_browser_fetch(
     """
     running: dict = request.app.state.running_agents
 
-    # Exact match first, then case-insensitive fallback
-    session = running.get(company_name)
+    # Exact match first, then case-insensitive fallback — scoped to this user
+    session = running.get((user_id, company_name))
     if session is None:
         for key, val in running.items():
-            if key.lower() == company_name.lower():
+            if key[0] == user_id and key[1].lower() == company_name.lower():
                 session = val
-                company_name = key
+                company_name = key[1]
                 break
 
     if session is None:
@@ -617,8 +638,8 @@ async def fetch_browser_roles(
     config = load_config()
     store = get_storage_backend(user_id)
 
-    # Look up the company in the in-memory registry
-    registry: list[dict] = request.app.state.registry
+    # Look up the company in the per-user registry
+    registry: list[dict] = load_or_bootstrap_registry(store)
     reg_map = {e["name"].lower(): e for e in registry}
     entry = reg_map.get(req.company_name.lower())
     if entry is None:
