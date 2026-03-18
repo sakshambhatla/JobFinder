@@ -14,6 +14,8 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",
     "sse-starlette>=2.0",
+    "rapidfuzz>=3.0",
+    "python-dateutil>=2.8",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,14 @@ playwright = ["playwright>=1.40"]
 browser-use = ["browser-use>=0.1"]
 langchain-anthropic = ["langchain-anthropic>=0.3"]
 langchain-google-genai = ["langchain-google-genai>=2.0"]
+
+# semantic: local embedding-based role filtering (one-time ~70MB ONNX model download)
+#   pip install -e ".[semantic]"
+semantic = ["fastembed>=0.3"]
+
+# supabase: multi-user Postgres backend + JWT auth
+#   pip install -e ".[supabase]"
+supabase = ["supabase>=2.0", "pyjwt[crypto]>=2.0"]
 
 # dev: test suite — pip install -e ".[dev]"
 dev = [

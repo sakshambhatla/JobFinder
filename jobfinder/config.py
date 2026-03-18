@@ -15,6 +15,11 @@ class RoleFilters(BaseModel):
     posted_after: str | None = None # e.g. "Feb 20, 2026"
     location: str | None = None     # e.g. "SF, Seattle, NY or Remote"
     confidence: str = "high"        # "high", "medium", or "low"
+    # Matching strategy for title and location filters (posted_after is always programmatic)
+    # "llm"      — batch LLM calls (default, most accurate, uses API credits)
+    # "fuzzy"    — local rapidfuzz token matching (instant, free, no model needed)
+    # "semantic" — local ONNX embedding similarity (instant, free, requires pip install jobfinder[semantic])
+    filter_strategy: str = "llm"
 
 
 class AppConfig(BaseModel):
@@ -39,6 +44,11 @@ class AppConfig(BaseModel):
     rpm_limit: int = 4
     # Print full raw API error responses alongside formatted summaries.
     debug: bool = False
+
+    # Skip Playwright career-page fallback (Pass 2) and return only ATS API results.
+    # Companies with unsupported ATS types are still returned as flagged_companies.
+    # Loosely coupled: set by UI checkbox today, could be auto-determined in future.
+    skip_career_page: bool = False
 
     # ── Browser agent settings (config.json only, not exposed in the UI) ──────
     # Hard time wall: agent is cancelled after this many minutes regardless of steps.

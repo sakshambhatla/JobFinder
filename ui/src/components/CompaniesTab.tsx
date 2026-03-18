@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { discoverCompanies, getCompanies, type DiscoveredCompany } from "@/lib/api";
+import {
+  discoverCompanies,
+  getCompanies,
+  getCompanyRun,
+  getCompanyRuns,
+  getResume,
+  type CompanyRun,
+  type CompanyRunSummary,
+  type DiscoveredCompany,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,6 +86,142 @@ function CompanyTable({ companies }: { companies: DiscoveredCompany[] }) {
   );
 }
 
+// ─── Run History ──────────────────────────────────────────────────────────────
+
+const RUNS_PER_PAGE = 5;
+
+function RunCard({ summary }: { summary: CompanyRunSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: run, isFetching } = useQuery<CompanyRun>({
+    queryKey: ["company-run", summary.id],
+    queryFn: () => getCompanyRun(summary.id),
+    enabled: expanded,
+  });
+
+  const date = new Date(summary.created_at).toLocaleDateString(undefined, {
+    month: "short", day: "numeric", year: "numeric",
+  });
+
+  return (
+    <div
+      className="rounded-xl border"
+      style={{
+        background: "rgba(255,255,255,0.05)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        borderColor: "rgba(255,255,255,0.12)",
+      }}
+    >
+      {/* Summary row */}
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-semibold text-white text-sm">{summary.run_name}</span>
+          <Badge className="text-[10px] bg-white/10 text-white/55 border border-white/20">
+            {summary.source_type === "seed" ? "seed" : "resume"}
+          </Badge>
+          <span className="text-xs text-white/45 tabular-nums">
+            {summary.company_count} {summary.company_count === 1 ? "company" : "companies"}
+          </span>
+          <span className="text-xs text-white/35">{date}</span>
+        </div>
+        <span className="text-white/40 text-sm ml-2 shrink-0">
+          {expanded ? "▲" : "▼"}
+        </span>
+      </button>
+
+      {/* Expanded company table */}
+      {expanded && (
+        <div className="px-4 pb-4">
+          {isFetching ? (
+            <div className="flex items-center gap-2 py-4 text-white/45 text-sm">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white/80" />
+              Loading…
+            </div>
+          ) : run && run.companies.length > 0 ? (
+            <CompanyTable companies={run.companies} />
+          ) : (
+            <p className="text-white/35 text-sm py-4 text-center">No companies in this run.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RunHistory() {
+  const [page, setPage] = useState(1);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["company-runs", page],
+    queryFn: () => getCompanyRuns(page, RUNS_PER_PAGE),
+    retry: false,
+  });
+
+  if (!data && !isFetching) return null;
+  if (data && data.total === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm text-white/50 uppercase tracking-wide">
+          Previous Runs
+        </h3>
+        {isFetching && (
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white/70" />
+        )}
+      </div>
+
+      {data && data.runs.length > 0 && (
+        <>
+          <div className="space-y-2">
+            {data.runs.map((run) => (
+              <RunCard key={run.id} summary={run} />
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {data.total_pages > 1 && (
+            <div className="flex items-center justify-center gap-4 pt-1">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(255,255,255,0.10)",
+                  border: "1px solid rgba(255,255,255,0.20)",
+                  color: "rgba(255,255,255,0.75)",
+                }}
+              >
+                ← Previous
+              </button>
+              <span className="text-sm text-white/60 tabular-nums">
+                Page {page} of {data.total_pages}
+              </span>
+              <button
+                disabled={page >= data.total_pages}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(255,255,255,0.10)",
+                  border: "1px solid rgba(255,255,255,0.20)",
+                  color: "rgba(255,255,255,0.75)",
+                }}
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Main tab ─────────────────────────────────────────────────────────────────
+
 type DiscoveryMode = "resume" | "seed";
 
 function parseSeedCompanies(raw: string): string[] {
@@ -92,7 +237,16 @@ export function CompaniesTab() {
   const [provider, setProvider] = useState<string>("gemini");
   const [mode, setMode] = useState<DiscoveryMode>("resume");
   const [seedInput, setSeedInput] = useState<string>("");
+  const [selectedResumeId, setSelectedResumeId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+
+  // Load resumes for the selector
+  const { data: resumeData } = useQuery({
+    queryKey: ["resume"],
+    queryFn: getResume,
+    retry: false,
+  });
+  const resumes = resumeData?.resumes ?? [];
 
   const { data: cached } = useQuery({
     queryKey: ["companies"],
@@ -103,14 +257,21 @@ export function CompaniesTab() {
   const discover = useMutation({
     mutationFn: () => {
       const seeds = mode === "seed" ? parseSeedCompanies(seedInput) : undefined;
+      const resume_id =
+        mode === "resume"
+          ? selectedResumeId || resumes[0]?.id
+          : undefined;
       return discoverCompanies({
         max_companies: maxCompanies ? parseInt(maxCompanies, 10) : undefined,
         model_provider: provider || undefined,
         seed_companies: seeds && seeds.length > 0 ? seeds : undefined,
+        resume_id,
       });
     },
     onSuccess: (data) => {
       qc.setQueryData(["companies"], data);
+      // Invalidate run history so the new run appears
+      qc.invalidateQueries({ queryKey: ["company-runs"] });
       setError(null);
     },
     onError: (err: { response?: { data?: { detail?: string } }; message: string }) => {
@@ -120,6 +281,13 @@ export function CompaniesTab() {
 
   const companies = discover.data?.companies ?? cached?.companies ?? [];
   const isSeedMode = mode === "seed";
+  const latestRunName = discover.data?.run_name;
+
+  const canDiscover =
+    !discover.isPending &&
+    (isSeedMode
+      ? parseSeedCompanies(seedInput).length > 0
+      : resumes.length > 0);
 
   return (
     <div className="space-y-6">
@@ -146,6 +314,38 @@ export function CompaniesTab() {
               ))}
             </div>
           </div>
+
+          {/* Resume selector (resume mode only) */}
+          {!isSeedMode && resumes.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="resume-select" className="text-white/75">
+                Active Resume
+              </Label>
+              <select
+                id="resume-select"
+                value={selectedResumeId || resumes[0]?.id}
+                onChange={(e) => setSelectedResumeId(e.target.value)}
+                className="flex h-8 w-72 rounded-lg px-3 py-1 text-sm text-white transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                style={glassSelectStyle}
+              >
+                {resumes.map((r) => (
+                  <option
+                    key={r.id}
+                    value={r.id}
+                    style={{ background: "#1b4332", color: "white" }}
+                  >
+                    {r.filename}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {!isSeedMode && resumes.length === 0 && (
+            <p className="text-sm text-amber-400/80 bg-amber-500/10 border border-amber-400/20 rounded-lg px-3 py-2">
+              Upload a resume first in the Upload Resume tab.
+            </p>
+          )}
 
           {/* Seed input (only in seed mode) */}
           {isSeedMode && (
@@ -193,7 +393,7 @@ export function CompaniesTab() {
             </div>
             <Button
               onClick={() => discover.mutate()}
-              disabled={discover.isPending || (isSeedMode && parseSeedCompanies(seedInput).length === 0)}
+              disabled={!canDiscover}
               className="self-end"
             >
               {discover.isPending ? (
@@ -230,6 +430,11 @@ export function CompaniesTab() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm text-white/50 uppercase tracking-wide">
               {companies.length} Companies
+              {latestRunName && (
+                <span className="ml-2 font-normal normal-case text-white/40">
+                  — run: <span className="text-white/60 font-semibold">{latestRunName}</span>
+                </span>
+              )}
             </h3>
             <Badge className="text-xs bg-white/10 text-white/60 border border-white/20">
               {discover.data ? "Fresh" : "Cached"}
@@ -238,6 +443,9 @@ export function CompaniesTab() {
           <CompanyTable companies={companies} />
         </div>
       )}
+
+      {/* Run History */}
+      <RunHistory />
     </div>
   );
 }

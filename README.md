@@ -28,7 +28,9 @@ jobfinder serve
 # → open http://localhost:8000
 ```
 
-> Troubleshooting, Windows instructions, UI dev setup, browser agent: **[setup/README.md](setup/README.md)**
+> **For development** (hot reload, separate dev server): See [setup/README.md](setup/README.md#ui-development-optional)
+>
+> Troubleshooting, Windows instructions, browser agent: **[setup/README.md](setup/README.md)**
 
 ---
 
@@ -92,7 +94,10 @@ CLI flags override config values (e.g. `--max-companies 25`).
 
 ## Resume Files
 
-Place plain text (`.txt`) resume files in `resumes/`. Multiple files are supported — all are combined when asking the LLM for suggestions.
+Place plain text (`.txt`) resume files in `resumes/`. Multiple files are supported.
+
+- **CLI** — all resumes are combined when asking the LLM for company suggestions.
+- **Web UI** — each uploaded resume gets a stable ID. When running Discover Companies you select which resume to use; the choice is saved with each run so you can compare results across resumes.
 
 ---
 
@@ -100,8 +105,9 @@ Place plain text (`.txt`) resume files in `resumes/`. Multiple files are support
 
 | File | Contents |
 |------|----------|
-| `data/resumes.json` | Parsed resume data |
-| `data/companies.json` | LLM-suggested companies (last run) |
+| `data/resumes.json` | Parsed resume data (one entry per uploaded resume) |
+| `data/companies.json` | LLM-suggested companies from the most recent run |
+| `data/company_runs.json` | Full history of discovery runs (UUID, name, source, companies) |
 | `data/company_registry.json` | Perpetual registry of all discovered companies |
 | `data/roles.json` | Fetched roles + companies flagged for manual check |
 | `data/api_profiles.json` | Discovered career-page API endpoints (browser agent cache) |

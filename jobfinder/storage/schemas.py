@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import uuid
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 KNOWN_ATS_TYPES = {"greenhouse", "lever", "ashby", "workday", "linkedin", "unknown"}
 
 
 class ParsedResume(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     filename: str
     full_text: str
     sections: dict[str, str]
@@ -77,3 +79,14 @@ class RolesCacheEntry(BaseModel):
     ats_type: str           # e.g. "greenhouse", "career_page"
     cached_at: str          # ISO timestamp (UTC)
     roles: list[DiscoveredRole]
+
+
+class CompanyRun(BaseModel):
+    """A single company-discovery run, persisted per user."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    run_name: str  # unique 2-word name per user (e.g. "dancing-monkey")
+    source_type: str  # "resume" | "seed"
+    source_id: str  # resume UUID (if resume) or seed list UUID (if seed)
+    seed_companies: list[str] | None = None  # original seed input, for reference
+    companies: list[DiscoveredCompany] = []
+    created_at: str = ""

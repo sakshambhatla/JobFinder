@@ -1,19 +1,27 @@
-"""SSE endpoint for streaming backend logs to the UI."""
+"""SSE endpoint for streaming backend logs to the UI.
+
+Disabled in managed mode (SUPABASE_URL set) to prevent cross-user data leakage.
+"""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from jobfinder.api.auth import get_current_user
 from jobfinder.utils.log_stream import get_current_seq, get_logs_since
 
 router = APIRouter()
 
 
 @router.get("/logs/stream")
-async def stream_logs(request: Request):
+async def stream_logs(
+    request: Request,
+    user_id: str | None = Depends(get_current_user),
+):
     """Stream log entries as SSE events.
 
     Each event has type ``"log"`` with JSON payload::
@@ -22,7 +30,14 @@ async def stream_logs(request: Request):
 
     Clients start from the current position (no replay of historical logs).
     Multiple clients can connect simultaneously — each tracks its own cursor.
+
+    Disabled in managed mode to prevent cross-user data leakage.
     """
+    if os.environ.get("SUPABASE_URL"):
+        raise HTTPException(
+            status_code=403,
+            detail="Log stream is disabled in managed mode.",
+        )
 
     async def event_generator():
         last_seq = get_current_seq()

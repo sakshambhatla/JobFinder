@@ -1,10 +1,36 @@
 import axios from "axios";
+import { supabase } from "@/lib/supabase";
 
 const api = axios.create({ baseURL: "/api" });
+
+// Attach Supabase JWT to every request when in managed mode
+api.interceptors.request.use(async (config) => {
+  const mode = localStorage.getItem("verdantme-mode");
+  if (supabase && mode === "managed") {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      config.headers.Authorization = `Bearer ${session.access_token}`;
+    }
+  }
+  return config;
+});
+
+// Redirect to login on 401 (expired/invalid token) — only in managed mode
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const mode = localStorage.getItem("verdantme-mode");
+    if (error.response?.status === 401 && supabase && mode === "managed") {
+      supabase.auth.signOut();
+    }
+    return Promise.reject(error);
+  },
+);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ParsedResume {
+  id: string;
   filename: string;
   skills: string[];
   job_titles: string[];
@@ -20,6 +46,33 @@ export interface DiscoveredCompany {
   career_page_url: string;
   ats_type: string;
   discovered_at: string;
+}
+
+export interface CompanyRunSummary {
+  id: string;
+  run_name: string;
+  source_type: "resume" | "seed";
+  source_id: string;
+  company_count: number;
+  created_at: string;
+}
+
+export interface CompanyRun {
+  id: string;
+  run_name: string;
+  source_type: "resume" | "seed";
+  source_id: string;
+  seed_companies: string[] | null;
+  companies: DiscoveredCompany[];
+  created_at: string;
+}
+
+export interface CompanyRunsPage {
+  runs: CompanyRunSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface DiscoveredRole {
@@ -78,15 +131,38 @@ export interface DiscoverCompaniesParams {
   max_companies?: number;
   model_provider?: string;
   seed_companies?: string[];
+  resume_id?: string;
+}
+
+export interface DiscoverCompaniesResponse {
+  companies: DiscoveredCompany[];
+  run_id: string;
+  run_name: string;
+  discovered_at: string;
 }
 
 export async function discoverCompanies(
   params: DiscoverCompaniesParams
-): Promise<{ companies: DiscoveredCompany[] }> {
-  const { data } = await api.post<{ companies: DiscoveredCompany[] }>(
+): Promise<DiscoverCompaniesResponse> {
+  const { data } = await api.post<DiscoverCompaniesResponse>(
     "/companies/discover",
     params
   );
+  return data;
+}
+
+export async function getCompanyRuns(
+  page = 1,
+  pageSize = 10
+): Promise<CompanyRunsPage> {
+  const { data } = await api.get<CompanyRunsPage>("/company-runs", {
+    params: { page, page_size: pageSize },
+  });
+  return data;
+}
+
+export async function getCompanyRun(runId: string): Promise<CompanyRun> {
+  const { data } = await api.get<CompanyRun>(`/company-runs/${encodeURIComponent(runId)}`);
   return data;
 }
 
@@ -115,16 +191,19 @@ export interface RoleFiltersParams {
   posted_after?: string;
   location?: string;
   confidence?: string;
+  filter_strategy?: "llm" | "fuzzy" | "semantic";
 }
 
 export interface DiscoverRolesParams {
   company_names?: string[];
+  company_run_id?: string;
   refresh?: boolean;
   resume?: boolean;
   use_cache?: boolean;
   role_filters?: RoleFiltersParams;
   relevance_score_criteria?: string;
   model_provider?: string;
+  skip_career_page?: boolean;
 }
 
 export interface RolesCheckpoint {
@@ -239,13 +318,28 @@ export interface BrowserAgentErrorEvent {
  *   for the company (e.g. Workday companies). The backend will use this URL
  *   instead of the one in the registry.
  */
-export function browserAgentStreamUrl(
+/**
+ * Build the SSE URL for a company's browser-agent stream.
+ * Pass this to `new EventSource(url)` — do NOT use axios for SSE.
+ *
+ * When Supabase auth is configured, the JWT is appended as a query param
+ * because EventSource doesn't support custom headers.
+ */
+export async function browserAgentStreamUrl(
   company_name: string,
   careerPageUrlOverride?: string,
-): string {
+): Promise<string> {
   let url = `/api/roles/fetch-browser/stream?company_name=${encodeURIComponent(company_name)}`;
   if (careerPageUrlOverride) {
     url += `&career_page_url_override=${encodeURIComponent(careerPageUrlOverride)}`;
+  }
+  // EventSource doesn't support custom headers — append JWT as query param (managed mode only)
+  const mode = localStorage.getItem("verdantme-mode");
+  if (supabase && mode === "managed") {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      url += `&token=${encodeURIComponent(session.access_token)}`;
+    }
   }
   return url;
 }

@@ -3,21 +3,24 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from jobfinder.api.auth import get_current_user
 from jobfinder.api.models import DiscoverRolesRequest, FetchBrowserRolesRequest
 from jobfinder.config import AppConfig, RoleFilters, load_config, require_api_key
-from jobfinder.roles.checkpoint import CHECKPOINT_FILENAME, Checkpoint
+from jobfinder.roles.checkpoint import Checkpoint
 from jobfinder.roles.discovery import discover_roles
 from jobfinder.roles.errors import RateLimitError
+from jobfinder.storage import get_storage_backend
+from jobfinder.storage.backend import StorageBackend
+from jobfinder.storage.registry import load_or_bootstrap_registry
 from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole
-from jobfinder.storage.store import StorageManager
 
 router = APIRouter()
 
 
-def _make_checkpoint(store: StorageManager) -> Checkpoint:
-    return Checkpoint(store.data_dir / CHECKPOINT_FILENAME)
+def _make_checkpoint(store: StorageBackend) -> Checkpoint:
+    return Checkpoint(store)
 
 
 # ── Browser-agent shared helpers ──────────────────────────────────────────────
@@ -49,7 +52,7 @@ def _to_roles(
 
 def _merge_to_file(
     role_dicts: list[dict],
-    store: StorageManager,
+    store: StorageBackend,
     existing_data: dict | None = None,
 ) -> None:
     """Upsert *role_dicts* into roles.json (dedup by URL, sort by score)."""
@@ -70,7 +73,7 @@ def _merge_to_file(
 async def _score_browser_roles(
     company_name: str,
     config: AppConfig,
-    store: StorageManager,
+    store: StorageBackend,
 ) -> int:
     """Score all stored roles for *company_name*.  Returns count of scored roles."""
     if not config.relevance_score_criteria:
@@ -95,7 +98,11 @@ async def _score_browser_roles(
 
 
 @router.post("/roles/discover")
-async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -> dict:
+async def discover_roles_endpoint(
+    req: DiscoverRolesRequest,
+    request: Request,
+    user_id: str | None = Depends(get_current_user),
+) -> dict:
     """Fetch open roles from ATS APIs, then apply filters and scoring.
 
     Set ``resume=true`` to continue a previous run that was interrupted by a
@@ -112,22 +119,42 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
         overrides["relevance_score_criteria"] = req.relevance_score_criteria
     if req.role_filters is not None:
         overrides["role_filters"] = req.role_filters.model_dump()
+    if req.skip_career_page is not None:
+        overrides["skip_career_page"] = req.skip_career_page
 
     config = load_config(**overrides)
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
     cp = _make_checkpoint(store)
 
     companies_data = store.read("companies.json")
-    # Require companies.json only when not using registry selection and not resuming
-    if companies_data is None and not req.company_names and not (req.resume and cp.exists()):
+
+    # Resolve company_run_id → company_names (if provided)
+    effective_company_names = req.company_names
+    if req.company_run_id and not effective_company_names:
+        all_runs: list[dict] = store.read("company_runs.json") or []
+        matched_run = next((r for r in all_runs if r.get("id") == req.company_run_id), None)
+        if matched_run is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Company run '{req.company_run_id}' not found.",
+            )
+        effective_company_names = [c["name"] for c in matched_run.get("companies", [])]
+
+    # Require companies.json only when not using explicit selection and not resuming
+    if companies_data is None and not effective_company_names and not (req.resume and cp.exists()):
         raise HTTPException(
             status_code=400,
             detail="No companies found. Run company discovery first.",
         )
     companies_data = companies_data or {}
 
-    # Ensure API key is present if LLM features are needed
-    if config.role_filters or config.relevance_score_criteria:
+    # Ensure API key is present if LLM features are needed.
+    # Skip the check when using local (fuzzy/semantic) filtering — no API calls needed.
+    _local_strategy = (
+        config.role_filters is not None
+        and getattr(config.role_filters, "filter_strategy", "llm") in ("fuzzy", "semantic")
+    )
+    if (config.role_filters and not _local_strategy) or config.relevance_score_criteria:
         try:
             require_api_key(config.model_provider)
         except SystemExit as exc:
@@ -149,11 +176,11 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
         resume_score_batches = cp.score_batches_done
     else:
         # Fresh run — resolve companies from registry or last-run file
-        if req.company_names:
-            registry: list[dict] = request.app.state.registry
+        if effective_company_names:
+            registry: list[dict] = load_or_bootstrap_registry(store)
             reg_map = {e["name"].lower(): e for e in registry}
-            selected = [reg_map[n.lower()] for n in req.company_names if n.lower() in reg_map]
-            missing = [n for n in req.company_names if n.lower() not in reg_map]
+            selected = [reg_map[n.lower()] for n in effective_company_names if n.lower() in reg_map]
+            missing = [n for n in effective_company_names if n.lower() not in reg_map]
             if missing:
                 raise HTTPException(
                     status_code=404,
@@ -189,7 +216,8 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
 
         try:
             roles, flagged = await asyncio.to_thread(
-                discover_roles, companies, config, effective_use_cache, _on_progress
+                discover_roles, companies, config,
+                store=store, use_cache=effective_use_cache, on_progress=_on_progress,
             )
         except Exception as exc:
             raise HTTPException(
@@ -303,10 +331,9 @@ async def discover_roles_endpoint(req: DiscoverRolesRequest, request: Request) -
 
 
 @router.get("/roles/unfiltered")
-async def get_unfiltered_roles() -> dict:
+async def get_unfiltered_roles(user_id: str | None = Depends(get_current_user)) -> dict:
     """Return raw/unfiltered role discovery results."""
-    config = load_config()
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
     data = store.read("roles_unfiltered.json")
     if data is None:
         raise HTTPException(status_code=404, detail="No unfiltered roles found.")
@@ -314,10 +341,9 @@ async def get_unfiltered_roles() -> dict:
 
 
 @router.get("/roles/checkpoint")
-async def get_roles_checkpoint() -> dict:
+async def get_roles_checkpoint(user_id: str | None = Depends(get_current_user)) -> dict:
     """Return summary of any saved checkpoint, or 404 if none exists."""
-    config = load_config()
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
     cp = _make_checkpoint(store)
     if not cp.exists():
         raise HTTPException(status_code=404, detail="No checkpoint found.")
@@ -334,10 +360,9 @@ async def get_roles_checkpoint() -> dict:
 
 
 @router.get("/roles")
-async def get_roles() -> dict:
+async def get_roles(user_id: str | None = Depends(get_current_user)) -> dict:
     """Return cached role discovery results."""
-    config = load_config()
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
     data = store.read("roles.json")
     if data is None:
         raise HTTPException(status_code=404, detail="No roles found. Run discovery first.")
@@ -349,6 +374,7 @@ async def stream_browser_fetch(
     company_name: str,
     request: Request,
     career_page_url_override: str | None = None,
+    user_id: str | None = Depends(get_current_user),
 ):
     """Stream real-time browser-agent progress for a flagged company via SSE.
 
@@ -377,11 +403,11 @@ async def stream_browser_fetch(
     from jobfinder.roles.ats.career_page import _run_browser_agent_streaming
 
     config = load_config()
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
 
     # ── Registry lookup ───────────────────────────────────────────────────────
 
-    registry: list[dict] = request.app.state.registry
+    registry: list[dict] = load_or_bootstrap_registry(store)
     reg_map = {e["name"].lower(): e for e in registry}
     entry = reg_map.get(company_name.lower())
     if entry is None:
@@ -407,7 +433,7 @@ async def stream_browser_fetch(
         kill_event=asyncio.Event(),
         metrics=AgentMetrics(company_name=entry["name"]),
     )
-    request.app.state.running_agents[entry["name"]] = session
+    request.app.state.running_agents[(user_id, entry["name"])] = session
 
     # ── Local helpers (thin wrappers that bind entry / store / session) ─────────
 
@@ -557,26 +583,30 @@ async def stream_browser_fetch(
             for t in pending_filter_tasks:
                 if not t.done():
                     t.cancel()
-            request.app.state.running_agents.pop(entry["name"], None)
+            request.app.state.running_agents.pop((user_id, entry["name"]), None)
 
     return EventSourceResponse(event_generator())
 
 
 @router.delete("/roles/fetch-browser/{company_name}")
-async def kill_browser_fetch(company_name: str, request: Request) -> dict:
+async def kill_browser_fetch(
+    company_name: str,
+    request: Request,
+    user_id: str | None = Depends(get_current_user),
+) -> dict:
     """Kill a running browser-use agent by company name.
 
     Returns ``{killed, partial_jobs}`` on success; 404 if no agent is running.
     """
     running: dict = request.app.state.running_agents
 
-    # Exact match first, then case-insensitive fallback
-    session = running.get(company_name)
+    # Exact match first, then case-insensitive fallback — scoped to this user
+    session = running.get((user_id, company_name))
     if session is None:
         for key, val in running.items():
-            if key.lower() == company_name.lower():
+            if key[0] == user_id and key[1].lower() == company_name.lower():
                 session = val
-                company_name = key
+                company_name = key[1]
                 break
 
     if session is None:
@@ -593,7 +623,11 @@ async def kill_browser_fetch(company_name: str, request: Request) -> dict:
 
 
 @router.post("/roles/fetch-browser")
-async def fetch_browser_roles(req: FetchBrowserRolesRequest, request: Request) -> dict:
+async def fetch_browser_roles(
+    req: FetchBrowserRolesRequest,
+    request: Request,
+    user_id: str | None = Depends(get_current_user),
+) -> dict:
     """Use a browser-use agent to fetch roles for a single flagged company.
 
     The company must exist in the registry (i.e. it was previously discovered).
@@ -602,10 +636,10 @@ async def fetch_browser_roles(req: FetchBrowserRolesRequest, request: Request) -
     Returns ``{ company_name, roles_found, roles }``.
     """
     config = load_config()
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
 
-    # Look up the company in the in-memory registry
-    registry: list[dict] = request.app.state.registry
+    # Look up the company in the per-user registry
+    registry: list[dict] = load_or_bootstrap_registry(store)
     reg_map = {e["name"].lower(): e for e in registry}
     entry = reg_map.get(req.company_name.lower())
     if entry is None:

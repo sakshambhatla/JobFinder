@@ -11,12 +11,14 @@ import {
 import {
   browserAgentStreamUrl,
   discoverRoles,
+  getCompanyRuns,
   killBrowserAgent,
   getRoles,
   getUnfilteredRoles,
   getRolesCheckpoint,
   getCompanyRegistry,
   type BrowserAgentMetrics,
+  type CompanyRunSummary,
   type DiscoveredRole,
   type FlaggedCompany,
   type RolesResponse,
@@ -291,11 +293,12 @@ function FlaggedBox({
     }));
   }
 
-  function startAgent(company: FlaggedCompany, urlOverride?: string) {
+  async function startAgent(company: FlaggedCompany, urlOverride?: string) {
     if (esRefs.current[company.name]) return; // already running
     updateState(company.name, () => ({ status: "running", jobsCollected: 0 }));
 
-    const es = new EventSource(browserAgentStreamUrl(company.name, urlOverride));
+    const url = await browserAgentStreamUrl(company.name, urlOverride);
+    const es = new EventSource(url);
     esRefs.current[company.name] = es;
 
     es.addEventListener("jobs_batch", (e) => {
@@ -574,14 +577,20 @@ function CompanySourceCard({
   setSelectedNames,
   registrySearch,
   setRegistrySearch,
+  selectedRunId,
+  setSelectedRunId,
+  allRuns,
 }: {
   registry: CompanyRegistryEntry[];
-  sourceMode: "last-run" | "registry";
-  setSourceMode: (m: "last-run" | "registry") => void;
+  sourceMode: "last-run" | "registry" | "pick-run";
+  setSourceMode: (m: "last-run" | "registry" | "pick-run") => void;
   selectedNames: string[];
   setSelectedNames: (n: string[]) => void;
   registrySearch: string;
   setRegistrySearch: (s: string) => void;
+  selectedRunId: string;
+  setSelectedRunId: (id: string) => void;
+  allRuns: CompanyRunSummary[];
 }) {
   const available = registry.filter(
     (e) =>
@@ -593,23 +602,62 @@ function CompanySourceCard({
     <Card>
       <CardContent className="pt-5 pb-4 space-y-4">
         {/* Mode toggle */}
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <span className="text-xs font-semibold text-white/45 uppercase tracking-wider mr-2">
             Company Source
           </span>
           <button className={modeBtn(sourceMode === "last-run")} onClick={() => setSourceMode("last-run")}>
             Last Discovery Run
           </button>
+          <button className={modeBtn(sourceMode === "pick-run")} onClick={() => setSourceMode("pick-run")}>
+            Pick a Run
+          </button>
           <button className={modeBtn(sourceMode === "registry")} onClick={() => setSourceMode("registry")}>
             Select from Registry
           </button>
         </div>
 
-        {sourceMode === "last-run" ? (
+        {sourceMode === "last-run" && (
           <p className="text-xs text-white/40">
-            Uses all companies from the previous Discover Companies run.
+            Uses all companies from the most recent Discover Companies run.
           </p>
-        ) : (
+        )}
+
+        {sourceMode === "pick-run" && (
+          <div className="space-y-2">
+            {allRuns.length === 0 ? (
+              <p className="text-xs text-white/35 italic">
+                No runs yet — run Discover Companies first.
+              </p>
+            ) : (
+              <>
+                <select
+                  value={selectedRunId}
+                  onChange={(e) => setSelectedRunId(e.target.value)}
+                  className="flex h-8 w-full max-w-sm rounded-lg px-3 py-1 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                  style={{
+                    background: "rgba(255,255,255,0.10)",
+                    border: "1px solid rgba(255,255,255,0.20)",
+                  }}
+                >
+                  <option value="" style={{ background: "#1b4332", color: "white" }}>
+                    — select a run —
+                  </option>
+                  {allRuns.map((r) => (
+                    <option key={r.id} value={r.id} style={{ background: "#1b4332", color: "white" }}>
+                      {r.run_name} · {r.company_count} companies · {new Date(r.created_at).toLocaleDateString()}
+                    </option>
+                  ))}
+                </select>
+                {!selectedRunId && (
+                  <p className="text-xs text-amber-400/70">Select a run above to use its companies.</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {sourceMode === "registry" && (
           <div className="space-y-3">
             {/* Search */}
             <Input
@@ -677,9 +725,10 @@ export function RolesTab() {
   const qc = useQueryClient();
 
   // Source selection state
-  const [sourceMode, setSourceMode] = useState<"last-run" | "registry">("last-run");
+  const [sourceMode, setSourceMode] = useState<"last-run" | "registry" | "pick-run">("last-run");
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [registrySearch, setRegistrySearch] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState<string>("");
 
   // Filter / scoring / provider state
   const [provider, setProvider] = useState<string>("gemini");
@@ -688,6 +737,8 @@ export function RolesTab() {
   const [postedAfter, setPostedAfter] = useState("");
   const [scoringCriteria, setScoringCriteria] = useState("");
   const [useCache, setUseCache] = useState(false);
+  const [filterStrategy, setFilterStrategy] = useState<"llm" | "fuzzy" | "semantic">("llm");
+  const [skipCareerPage, setSkipCareerPage] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Pagination & tab state
@@ -723,8 +774,18 @@ export function RolesTab() {
     retry: false,
   });
 
+  // Company runs for the "Pick a Run" mode
+  const { data: runsData } = useQuery({
+    queryKey: ["company-runs", 1],
+    queryFn: () => getCompanyRuns(1, 50),
+    retry: false,
+  });
+  const allRuns = runsData?.runs ?? [];
+
   const canDiscover =
-    sourceMode === "last-run" || (sourceMode === "registry" && selectedNames.length > 0);
+    sourceMode === "last-run" ||
+    (sourceMode === "registry" && selectedNames.length > 0) ||
+    (sourceMode === "pick-run" && !!selectedRunId);
 
   const discover = useMutation({
     mutationFn: (resume: boolean) => {
@@ -734,16 +795,19 @@ export function RolesTab() {
         refresh: true,
         use_cache: useCache,
         company_names: sourceMode === "registry" ? selectedNames : undefined,
+        company_run_id: sourceMode === "pick-run" ? selectedRunId : undefined,
         role_filters: hasFilters
           ? {
               title: titleFilter || undefined,
               location: locationFilter || undefined,
               posted_after: postedAfter || undefined,
               confidence: "high",
+              filter_strategy: filterStrategy,
             }
           : undefined,
         relevance_score_criteria: scoringCriteria || undefined,
         model_provider: provider || undefined,
+        skip_career_page: skipCareerPage || undefined,
       });
     },
     onSuccess: (data) => {
@@ -815,6 +879,9 @@ export function RolesTab() {
         setSelectedNames={setSelectedNames}
         registrySearch={registrySearch}
         setRegistrySearch={setRegistrySearch}
+        selectedRunId={selectedRunId}
+        setSelectedRunId={setSelectedRunId}
+        allRuns={allRuns}
       />
 
       {/* Filter form */}
@@ -876,6 +943,35 @@ export function RolesTab() {
               </select>
             </div>
           </div>
+          {/* Filter strategy toggle — only shown when title or location filter is set */}
+          {(titleFilter || locationFilter) && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-white/45 uppercase tracking-wider mr-1">
+                Filter via
+              </span>
+              {(["llm", "fuzzy", "semantic"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setFilterStrategy(s)}
+                  className={[
+                    "px-3 py-1 rounded-lg text-xs font-semibold transition-all",
+                    filterStrategy === s
+                      ? "bg-white/20 text-white border border-white/30"
+                      : "bg-transparent text-white/45 border border-transparent hover:text-white/70 hover:bg-white/08",
+                  ].join(" ")}
+                >
+                  {s === "llm" ? "LLM" : s === "fuzzy" ? "Fuzzy" : "Semantic"}
+                </button>
+              ))}
+              <span className="text-xs text-white/30 ml-1">
+                {filterStrategy === "llm"
+                  ? "most accurate, uses API credits"
+                  : filterStrategy === "fuzzy"
+                  ? "instant, free, no LLM call"
+                  : "instant, free — requires pip install jobfinder[semantic]"}
+              </span>
+            </div>
+          )}
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <Button
               onClick={() => discover.mutate(false)}
@@ -899,11 +995,28 @@ export function RolesTab() {
               />
               Use cached results <span className="text-xs text-white/35">(TTL: 2 days)</span>
             </label>
+            <label className="flex items-center gap-2 text-sm text-white/55 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={skipCareerPage}
+                onChange={(e) => setSkipCareerPage(e.target.checked)}
+                className="accent-white/70"
+              />
+              API results only <span className="text-xs text-white/35">(skip Playwright career page)</span>
+            </label>
             {sourceMode === "registry" && selectedNames.length > 0 && (
               <span className="text-xs text-white/40">
                 {selectedNames.length} {selectedNames.length === 1 ? "company" : "companies"} selected
               </span>
             )}
+            {sourceMode === "pick-run" && selectedRunId && (() => {
+              const run = allRuns.find((r) => r.id === selectedRunId);
+              return run ? (
+                <span className="text-xs text-white/40">
+                  Run: {run.run_name} · {run.company_count} companies
+                </span>
+              ) : null;
+            })()}
           </div>
         </CardContent>
       </Card>

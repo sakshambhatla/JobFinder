@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 
+from jobfinder.api.auth import get_current_user
 from jobfinder.api.models import DiscoverCompaniesRequest
 from jobfinder.companies.discovery import discover_companies
+from jobfinder.company_runs.name_generator import generate_run_name
 from jobfinder.config import load_config, require_api_key
-from jobfinder.storage.registry import upsert_registry
+from jobfinder.storage import get_storage_backend
+from jobfinder.storage.registry import load_or_bootstrap_registry, upsert_registry
 from jobfinder.storage.schemas import DiscoveredCompany
-from jobfinder.storage.store import StorageManager
+from jobfinder.system_config import load_system_config
 
 router = APIRouter()
 
 
 @router.post("/companies/discover")
 async def discover_companies_endpoint(
-    req: DiscoverCompaniesRequest, request: Request
+    req: DiscoverCompaniesRequest,
+    user_id: str | None = Depends(get_current_user),
 ) -> dict:
     """Run LLM-based company discovery and return the results."""
     overrides: dict = {}
@@ -27,7 +32,8 @@ async def discover_companies_endpoint(
         overrides["model_provider"] = req.model_provider
 
     config = load_config(**overrides)
-    store = StorageManager(config.data_dir)
+    sys_config = load_system_config()
+    store = get_storage_backend(user_id)
 
     # Ensure API key is present before starting
     try:
@@ -37,14 +43,30 @@ async def discover_companies_endpoint(
 
     seed_companies = req.seed_companies or None
     resumes: list[dict] = []
+    source_id: str
 
-    if not seed_companies:
-        resumes = store.read("resumes.json") or []
-        if not resumes:
-            raise HTTPException(
-                status_code=400,
-                detail="No resume found. Upload a resume first.",
-            )
+    if seed_companies:
+        # Seed mode: generate a transient UUID for this seed list
+        source_id = str(uuid.uuid4())
+    else:
+        # Resume mode: look up the selected resume by ID
+        all_resumes = store.read("resumes.json") or []
+        if not all_resumes:
+            raise HTTPException(status_code=400, detail="No resume found. Upload a resume first.")
+
+        if req.resume_id:
+            matched = [r for r in all_resumes if r.get("id") == req.resume_id]
+            if not matched:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Resume with id '{req.resume_id}' not found.",
+                )
+            resumes = matched
+            source_id = req.resume_id
+        else:
+            # Fallback: use the first resume when no ID is specified
+            resumes = all_resumes[:1]
+            source_id = resumes[0].get("id") or str(uuid.uuid4())
 
     # Run blocking LLM call in a thread pool
     try:
@@ -54,7 +76,7 @@ async def discover_companies_endpoint(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Company discovery failed: {exc}") from exc
 
-    # Merge with existing if configured
+    # Merge with existing companies.json if configured (legacy last-run store)
     if config.write_preference == "merge" and store.exists("companies.json"):
         existing_data = store.read("companies.json") or {}
         existing = [
@@ -66,36 +88,60 @@ async def discover_companies_endpoint(
             seen[c.name.lower()] = c
         companies = list(seen.values())
 
-    import hashlib
-    resume_text = "".join(r.get("full_text", "") for r in resumes)
-    resume_hash = hashlib.sha256(resume_text.encode()).hexdigest()[:16]
+    discovered_at = datetime.now(timezone.utc).isoformat()
 
-    output = {
-        "discovered_at": datetime.now(timezone.utc).isoformat(),
-        "source_resume_hash": resume_hash,
+    # Write legacy companies.json (backwards-compat for "last-run" source mode)
+    legacy_output = {
+        "discovered_at": discovered_at,
         "companies": [c.model_dump() for c in companies],
     }
-    store.write("companies.json", output)
+    store.write("companies.json", legacy_output)
+
+    # ── Create and persist the company run ────────────────────────────────────
+    existing_runs: list[dict] = store.read("company_runs.json") or []
+    existing_names = {r["run_name"] for r in existing_runs}
+    run_name = generate_run_name(existing_names)
+    run_id = str(uuid.uuid4())
+
+    new_run = {
+        "id": run_id,
+        "run_name": run_name,
+        "source_type": "seed" if seed_companies else "resume",
+        "source_id": source_id,
+        "seed_companies": list(seed_companies) if seed_companies else None,
+        "companies": [c.model_dump() for c in companies],
+        "created_at": discovered_at,
+    }
+
+    # Prepend new run; evict oldest if over the limit
+    updated_runs = [new_run] + existing_runs
+    max_runs = sys_config.max_company_runs_per_user
+    if len(updated_runs) > max_runs:
+        updated_runs = updated_runs[:max_runs]
+
+    store.write("company_runs.json", updated_runs)
 
     # Upsert discovered companies into the perpetual registry
     upsert_registry(store, companies)
-    from jobfinder.api.main import reload_registry
-    reload_registry(request.app)
 
-    return output
+    return {
+        **legacy_output,
+        "run_id": run_id,
+        "run_name": run_name,
+    }
 
 
 @router.get("/companies/registry")
-async def get_company_registry(request: Request) -> dict:
-    """Return all companies from the perpetual registry (served from memory)."""
-    return {"companies": request.app.state.registry}
+async def get_company_registry(user_id: str | None = Depends(get_current_user)) -> dict:
+    """Return all companies from the perpetual registry (per-user)."""
+    store = get_storage_backend(user_id)
+    return {"companies": load_or_bootstrap_registry(store)}
 
 
 @router.get("/companies")
-async def get_companies() -> dict:
+async def get_companies(user_id: str | None = Depends(get_current_user)) -> dict:
     """Return cached company discovery results."""
-    config = load_config()
-    store = StorageManager(config.data_dir)
+    store = get_storage_backend(user_id)
     data = store.read("companies.json")
     if data is None:
         raise HTTPException(status_code=404, detail="No companies found. Run discovery first.")
