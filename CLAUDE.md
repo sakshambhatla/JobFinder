@@ -35,7 +35,7 @@ jobfinder/
     supabase_backend.py# SupabaseStorageBackend: maps collection filenames to Postgres tables + RLS
     registry.py        # Company registry: load_or_bootstrap_registry(), upsert_registry(), update_registry_searchable()
     api_profiles.py    # load/save discovered career-page API endpoints (data/api_profiles.json)
-    vault.py           # Supabase Vault: store/get/delete per-user LLM API keys (SECURITY DEFINER)
+    vault.py           # Supabase Vault: store/get/delete per-user LLM API keys (SECURITY DEFINER); gracefully handles missing vault functions
     __init__.py        # get_storage_backend(user_id, jwt_token) → JSON or Supabase backend
   utils/
     http.py         # head_ok(url), get_json(url, timeout) with retry
@@ -43,9 +43,12 @@ jobfinder/
     throttle.py     # Shared RateLimiter; get_limiter(rpm) — process-level singleton
     log_stream.py   # Centralized logging: Rich console + file + SSE ring buffer (2000 entries)
     gemini_errors.py# Parse Gemini 429 responses (daily vs per-minute limits)
+scripts/
+  apply_vault_migration.py  # Apply vault SQL migration via psql; falls back to printing SQL + dashboard link
 ui/               # → see ui/CLAUDE.md
 supabase/
   migrations/     # Numbered SQL migrations (schema, RLS, vault functions, company/job runs, profile pics)
+                  # NOTE: supabase_vault extension is pre-installed on Supabase — omit CREATE EXTENSION
 ```
 
 ## Config (`config.json`)
