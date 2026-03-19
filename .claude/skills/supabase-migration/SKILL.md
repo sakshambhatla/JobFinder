@@ -87,6 +87,21 @@ create policy "<table_name>_insert_authenticated"
   with check (auth.role() = 'authenticated');
 ```
 
+### 3.5. Verify schema consistency
+
+After writing the migration SQL, run the schema sync test to ensure column names are consistent with `supabase_backend.py`:
+
+```bash
+source .venv/bin/activate && pytest tests/test_schema_sync.py -v
+```
+
+If the test fails:
+- **New table**: You need to add read/write handlers in `supabase_backend.py` (step 4)
+- **New column on existing table**: Update the row dicts in the relevant `_write_*` method
+- **Renamed column**: Update all references in `supabase_backend.py` (dict keys, `.eq()` args, `.select()` args)
+
+Run the test again after making backend changes to confirm alignment.
+
 ### 4. Update SupabaseStorageBackend (if needed)
 
 If adding a new collection, update `jobfinder/storage/supabase_backend.py`:
@@ -102,4 +117,5 @@ If adding new data shapes, update `jobfinder/storage/schemas.py` with Pydantic m
 - Review the SQL for correctness
 - Check that RLS policies are present and correct
 - Ensure the migration is idempotent (`if not exists` / `or replace`)
+- Run schema sync test: `pytest tests/test_schema_sync.py -v`
 - Run CLI tests to ensure nothing broke

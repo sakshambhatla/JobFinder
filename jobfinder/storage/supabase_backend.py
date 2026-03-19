@@ -50,6 +50,10 @@ class SupabaseStorageBackend:
         self._user_id = user_id
         self._client = _supabase_client(jwt_token)
 
+    @property
+    def user_id(self) -> str | None:
+        return self._user_id
+
     # ── StorageBackend protocol ────────────────────────────────────────────────
 
     def read(self, collection: str) -> dict | list | None:

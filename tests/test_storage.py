@@ -11,6 +11,7 @@ from jobfinder.storage.api_profiles import (
     save_profile,
     all_profiles,
     _domain_key,
+    _validate_profile_domain,
 )
 
 
@@ -119,3 +120,76 @@ class TestApiProfiles:
     def test_all_profiles_empty_when_no_file(self, tmp_path: Path):
         store = StorageManager(tmp_path)
         assert all_profiles(store) == {}
+
+    def test_save_rejects_foreign_absolute_url(self, tmp_path: Path):
+        store = StorageManager(tmp_path)
+        url = "https://jobs.netflix.com/careers"
+        profile = {
+            "endpoints": [{"method": "POST", "path": "https://evil.com/steal"}],
+        }
+        save_profile(url, "Netflix", profile, store)
+        assert load_profile(url, store) is None  # not written
+
+    def test_save_allows_relative_path(self, tmp_path: Path):
+        store = StorageManager(tmp_path)
+        url = "https://jobs.netflix.com/careers"
+        profile = {
+            "endpoints": [{"method": "POST", "path": "/api/apply/v2/jobs"}],
+        }
+        save_profile(url, "Netflix", profile, store)
+        loaded = load_profile(url, store)
+        assert loaded is not None
+        assert loaded["endpoints"][0]["path"] == "/api/apply/v2/jobs"
+
+    def test_save_allows_same_domain_absolute_url(self, tmp_path: Path):
+        store = StorageManager(tmp_path)
+        url = "https://jobs.netflix.com/careers"
+        profile = {
+            "endpoints": [{"method": "GET", "path": "https://jobs.netflix.com/api/jobs"}],
+        }
+        save_profile(url, "Netflix", profile, store)
+        loaded = load_profile(url, store)
+        assert loaded is not None
+
+
+# ── Domain validation unit tests ───────────────────────────────────────────────
+
+class TestValidateProfileDomain:
+    def test_relative_path_accepted(self):
+        assert _validate_profile_domain(
+            "https://jobs.example.com",
+            {"endpoints": [{"path": "/api/jobs"}]},
+        ) is True
+
+    def test_same_domain_accepted(self):
+        assert _validate_profile_domain(
+            "https://jobs.example.com",
+            {"endpoints": [{"path": "https://jobs.example.com/api/jobs"}]},
+        ) is True
+
+    def test_foreign_domain_rejected(self):
+        assert _validate_profile_domain(
+            "https://jobs.example.com",
+            {"endpoints": [{"path": "https://evil.com/steal"}]},
+        ) is False
+
+    def test_empty_url_rejected(self):
+        assert _validate_profile_domain(
+            "",
+            {"endpoints": [{"path": "/api/jobs"}]},
+        ) is False
+
+    def test_no_endpoints_accepted(self):
+        assert _validate_profile_domain(
+            "https://jobs.example.com",
+            {"platform": "Custom"},
+        ) is True
+
+    def test_mixed_paths_one_foreign_rejected(self):
+        assert _validate_profile_domain(
+            "https://jobs.example.com",
+            {"endpoints": [
+                {"path": "/api/jobs"},
+                {"path": "https://evil.com/phish"},
+            ]},
+        ) is False

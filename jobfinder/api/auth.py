@@ -1,8 +1,9 @@
 """Authentication dependency for FastAPI routes.
 
-When ``SUPABASE_URL`` is set, verifies the Supabase JWT from the
-``Authorization: Bearer <token>`` header (or ``?token=`` query param for SSE)
-and returns the ``user_id``.
+When ``SUPABASE_URL`` is set, verifies the Supabase JWT using Supabase's
+JWKS endpoint (``/auth/v1/.well-known/jwks.json``).  This works for both
+ES256/P-256 (newer Supabase projects) and HS256 (older projects) since the
+JWKS endpoint advertises the correct key type.
 
 When ``SUPABASE_URL`` is **not** set (local dev), returns ``None`` — the
 storage factory falls back to :class:`JsonStorageBackend` and no auth is
@@ -20,22 +21,41 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 # (we handle the missing-header case ourselves below).
 _bearer = HTTPBearer(auto_error=False)
 
+# Module-level JWKS client — shared across requests so public keys are cached.
+_jwks_client = None
+
+
+def _get_jwks_client():
+    global _jwks_client
+    if _jwks_client is None:
+        try:
+            from jwt import PyJWKClient
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="Server misconfigured: pyjwt[crypto] not installed",
+            )
+        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+        _jwks_client = PyJWKClient(jwks_url, cache_keys=True)
+    return _jwks_client
+
 
 def _decode_jwt(raw_token: str) -> str:
-    """Decode a Supabase JWT and return the user UUID (``sub`` claim)."""
-    jwt_secret = os.environ.get("SUPABASE_JWT_SECRET", "")
-    if not jwt_secret:
-        raise HTTPException(
-            status_code=500,
-            detail="Server misconfigured: SUPABASE_JWT_SECRET not set",
-        )
+    """Decode a Supabase JWT and return the user UUID (``sub`` claim).
+
+    Uses JWKS-based verification so it works regardless of whether the project
+    uses HS256 or ES256/P-256 signing.
+    """
     try:
         import jwt
 
+        client = _get_jwks_client()
+        signing_key = client.get_signing_key_from_jwt(raw_token)
         payload = jwt.decode(
             raw_token,
-            jwt_secret,
-            algorithms=["HS256"],
+            signing_key.key,
+            algorithms=["ES256", "RS256", "HS256"],
             audience="authenticated",
         )
         return payload["sub"]

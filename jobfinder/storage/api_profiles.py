@@ -25,11 +25,13 @@ Schema (one entry per domain)::
 """
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 from jobfinder.storage.backend import StorageBackend
 
 _FILENAME = "api_profiles.json"
+log = logging.getLogger(__name__)
 
 
 def _domain_key(url: str) -> str:
@@ -39,6 +41,24 @@ def _domain_key(url: str) -> str:
     'explore.jobs.netflix.net'
     """
     return urlparse(url).netloc
+
+
+def _validate_profile_domain(career_page_url: str, profile: dict) -> bool:
+    """Check that endpoint paths are relative or same-domain.
+
+    Rejects profiles containing absolute URLs that point to a different domain
+    than *career_page_url* — prevents a poisoning attack where a malicious
+    profile redirects browser agents to an attacker-controlled URL.
+    """
+    expected = _domain_key(career_page_url)
+    if not expected:
+        return False
+    for ep in profile.get("endpoints", []):
+        path = ep.get("path", "")
+        if path.startswith("http://") or path.startswith("https://"):
+            if _domain_key(path) != expected:
+                return False
+    return True
 
 
 def load_profile(career_page_url: str, store: StorageBackend) -> dict | None:
@@ -56,8 +76,16 @@ def save_profile(
     """Upsert *profile* for the domain of *career_page_url*.
 
     Merges new data on top of any existing entry; always keeps the full set of
-    associated company names (deduped).
+    associated company names (deduped).  Rejects profiles with endpoints
+    pointing to foreign domains.
     """
+    if not _validate_profile_domain(career_page_url, profile):
+        log.warning(
+            "Rejected api_profile for %s (%s): endpoint domain mismatch",
+            company_name,
+            career_page_url,
+        )
+        return
     key = _domain_key(career_page_url)
     profiles: dict = store.read(_FILENAME) or {}
     existing = profiles.get(key, {})

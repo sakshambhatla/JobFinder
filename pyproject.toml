@@ -16,6 +16,8 @@ dependencies = [
     "sse-starlette>=2.0",
     "rapidfuzz>=3.0",
     "python-dateutil>=2.8",
+    "supabase>=2.0",
+    "pyjwt[crypto]>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -35,9 +37,6 @@ langchain-google-genai = ["langchain-google-genai>=2.0"]
 #   pip install -e ".[semantic]"
 semantic = ["fastembed>=0.3"]
 
-# supabase: multi-user Postgres backend + JWT auth
-#   pip install -e ".[supabase]"
-supabase = ["supabase>=2.0", "pyjwt[crypto]>=2.0"]
 
 # dev: test suite — pip install -e ".[dev]"
 dev = [

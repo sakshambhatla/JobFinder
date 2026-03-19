@@ -15,12 +15,26 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Redirect to login on 401 (expired/invalid token) — only in managed mode
+// On 401, try refreshing the JWT before signing out — only in managed mode.
+// This handles the case where the access token expires mid-request (e.g. during
+// a slow Gemini key validation call).
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const mode = localStorage.getItem("verdantme-mode");
     if (error.response?.status === 401 && supabase && mode === "managed") {
+      // Avoid infinite retry loops: only attempt refresh once per request.
+      if (!error.config._retried) {
+        const { data: { session }, error: refreshErr } =
+          await supabase.auth.refreshSession();
+        if (session && !refreshErr) {
+          // Retry the original request with the fresh token.
+          error.config._retried = true;
+          error.config.headers.Authorization = `Bearer ${session.access_token}`;
+          return api.request(error.config);
+        }
+      }
+      // Refresh failed or already retried — session is truly expired.
       supabase.auth.signOut();
     }
     return Promise.reject(error);

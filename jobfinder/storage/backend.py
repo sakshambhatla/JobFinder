@@ -28,3 +28,8 @@ class StorageBackend(Protocol):
     def delete(self, collection: str) -> None:
         """Delete a collection. No-op if it does not exist."""
         ...
+
+    @property
+    def user_id(self) -> str | None:
+        """Return the current user ID, or ``None`` in local/anonymous mode."""
+        ...

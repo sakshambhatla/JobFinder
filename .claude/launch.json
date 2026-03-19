@@ -6,6 +6,18 @@
       "runtimeExecutable": "/bin/bash",
       "runtimeArgs": ["-c", "export NVM_DIR=\"$HOME/.nvm\" && source \"$NVM_DIR/nvm.sh\" && nvm use 20 && pnpm --dir /Users/sakshambhatla/workplace/JobFinder/ui dev"],
       "port": 5173
+    },
+    {
+      "name": "uat-ui-dev",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["-c", "export NVM_DIR=\"$HOME/.nvm\" && source \"$NVM_DIR/nvm.sh\" && nvm use 20 && cd /Users/sakshambhatla/workplace/JobFinder/ui && npx vite --port 5180"],
+      "port": 5180
+    },
+    {
+      "name": "api-dev",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["-c", "source /Users/sakshambhatla/workplace/JobFinder/.venv/bin/activate && source ~/.env && jobfinder serve --reload"],
+      "port": 8000
     }
   ]
 }

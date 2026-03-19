@@ -126,8 +126,10 @@ def resolve_api_key(provider: str, user_id: str | None = None) -> str:
     """
     env_var = "GEMINI_API_KEY" if provider == "gemini" else "ANTHROPIC_API_KEY"
 
+    managed_mode = bool(user_id and os.environ.get("SUPABASE_URL"))
+
     # 1. Try user-specific key from Vault (managed mode only).
-    if user_id and os.environ.get("SUPABASE_URL"):
+    if managed_mode:
         try:
             from jobfinder.storage.vault import get_api_key
 
@@ -137,13 +139,19 @@ def resolve_api_key(provider: str, user_id: str | None = None) -> str:
         except Exception as exc:
             logging.warning("Vault lookup failed for user %s / %s: %s", user_id, provider, exc)
 
-    # 2. Server-level environment variable.
+        # In managed mode, do NOT fall back to server env vars — each user
+        # must store their own key via Settings → API Keys.
+        raise ValueError(
+            f"No {provider} API key stored. "
+            "Open Settings → API Keys to add your key."
+        )
+
+    # 2. Server-level environment variable (local / CLI mode only).
     env_key = os.environ.get(env_var)
     if env_key:
         return env_key
 
     raise ValueError(
         f"No {provider} API key available. "
-        "Store your key in Settings (managed mode) or set the "
-        f"{env_var} environment variable."
+        f"Set the {env_var} environment variable."
     )

@@ -1,0 +1,28 @@
+JOHN DOE
+Senior Product Engineer (UX & Engineering)
+San Francisco, CA | john.doe.eng@email.com | github.com/jdoe-dev
+
+SKILLS
+TypeScript, React, Go, WebAssembly, Node.js, GraphQL, PostgreSQL, Figma, Design Systems, Accessibility, Canvas API, WebGL, Tailwind CSS, Storybook, Jest, Cypress, Framer Motion
+
+EXPERIENCE
+Senior Product Engineer at Figma (2021–present)
+  Lead developer for the Advanced Prototyping initiative, implementing a state-management engine that allowed designers to build logic-driven UX without code.
+  Refactored Inspect Mode UI, improving CSS/Swift/Kotlin code generation accuracy by 25%.
+  Spearheaded WCAG 2.1 compliance audit, implementing keyboard navigation and screen-reader support for the main canvas.
+
+Senior Software Engineer at Atlassian (2018–2021)
+  Core contributor to Atlaskit design system. Developed 10+ high-reusability React components used by thousands of internal developers.
+  Led frontend architecture for Jira Project Home overhaul, reducing perceived load times by 40% through optimistic UI updates and skeleton loading.
+  Partnered with UX researchers on A/B testing navigation patterns, resulting in 12% increase in Task Completion speed for new Jira users.
+
+Full Stack Developer at TechStart Inc. (2016–2018)
+  Owned end-to-end design and development of a mobile-first fintech dashboard.
+  Built a custom charting library using D3.js for complex market data visualization.
+
+EDUCATION
+BS Computer Science, University of Washington, 2016
+
+PROJECTS
+Design System CLI: Open-source tool for syncing Figma Design Tokens into Tailwind configurations (1.2k+ stars).
+A11y Advocate Award (2020): Recognized at Atlassian for championing inclusive design patterns.

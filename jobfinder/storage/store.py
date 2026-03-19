@@ -37,6 +37,10 @@ class JsonStorageBackend:
     def delete(self, filename: str) -> None:
         (self.data_dir / filename).unlink(missing_ok=True)
 
+    @property
+    def user_id(self) -> str | None:
+        return None
+
 
 # Backward-compatible alias — existing code imports ``StorageManager``.
 StorageManager = JsonStorageBackend
