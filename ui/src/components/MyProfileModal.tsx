@@ -9,6 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { useMode } from "@/contexts/ModeContext";
+import { useAuth } from "@/components/AuthProvider";
+import { supabase } from "@/lib/supabase";
 
 interface MyProfileModalProps {
   open: boolean;
@@ -67,17 +70,35 @@ function resizeImage(file: File): Promise<string> {
 }
 
 export function MyProfileModal({ open, onOpenChange, onSave }: MyProfileModalProps) {
+  const { mode } = useMode();
+  const { user } = useAuth();
   const [profile, setProfile] = useState<ProfileData>(loadProfile);
   const [hasChanges, setHasChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Reload when modal opens
+  // Reload when modal opens; in managed mode also fetch from Supabase
   useEffect(() => {
-    if (open) {
-      setProfile(loadProfile());
-      setHasChanges(false);
+    if (!open) return;
+    setProfile(loadProfile());
+    setHasChanges(false);
+
+    if (mode === "managed" && supabase && user) {
+      supabase
+        .from("profiles")
+        .select("display_name, avatar_url")
+        .eq("id", user.id)
+        .single()
+        .then(({ data }) => {
+          if (!data) return;
+          setProfile((prev) => ({
+            ...prev,
+            displayName: data.display_name ?? prev.displayName,
+            avatarDataUrl: data.avatar_url ?? prev.avatarDataUrl,
+          }));
+        });
     }
-  }, [open]);
+  }, [open, mode, user]);
 
   const handleChange = (field: keyof ProfileData, value: string | null) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
@@ -95,11 +116,49 @@ export function MyProfileModal({ open, onOpenChange, onSave }: MyProfileModalPro
     }
   };
 
-  const handleSave = () => {
-    saveProfile(profile);
-    setHasChanges(false);
-    onSave?.();
-    onOpenChange(false);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (mode === "managed" && supabase && user) {
+        let avatarUrl: string | null = null;
+
+        // Upload new avatar to Supabase Storage if one was selected
+        if (profile.avatarDataUrl?.startsWith("data:")) {
+          const blob = await fetch(profile.avatarDataUrl).then((r) => r.blob());
+          const path = `${user.id}/avatar.jpg`;
+          const { error } = await supabase.storage
+            .from("avatars")
+            .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+          if (error) throw error;
+          avatarUrl = supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+        } else {
+          // Already a remote URL (unchanged) or null (removed)
+          avatarUrl = profile.avatarDataUrl;
+        }
+
+        await supabase
+          .from("profiles")
+          .update({
+            display_name: profile.displayName,
+            avatar_url: avatarUrl,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", user.id);
+
+        // Mirror remote URL into localStorage so ProfileMenu renders instantly
+        saveProfile({ ...profile, avatarDataUrl: avatarUrl });
+      } else {
+        saveProfile(profile);
+      }
+
+      setHasChanges(false);
+      onSave?.();
+      onOpenChange(false);
+    } catch (err) {
+      console.error("Failed to save profile:", err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -202,7 +261,10 @@ export function MyProfileModal({ open, onOpenChange, onSave }: MyProfileModalPro
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="button" onClick={handleSave} disabled={!hasChanges}>
+          <Button type="button" onClick={handleSave} disabled={!hasChanges || saving}>
+            {saving && (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent mr-2" />
+            )}
             Save
           </Button>
         </DialogFooter>

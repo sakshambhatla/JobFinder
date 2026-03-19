@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,7 @@ import {
 import { useMode } from "@/contexts/ModeContext";
 import { useAuth } from "@/components/AuthProvider";
 import { loadProfile } from "@/components/MyProfileModal";
+import { supabase } from "@/lib/supabase";
 import { MyProfileModal } from "@/components/MyProfileModal";
 import { PreferencesModal } from "@/components/PreferencesModal";
 import { JobSearchPreferencesModal } from "@/components/JobSearchPreferencesModal";
@@ -29,14 +30,28 @@ export function ProfileMenu() {
   const [, setTick] = useState(0);
   const handleProfileSave = useCallback(() => setTick((t) => t + 1), []);
 
+  // In managed mode, fetch avatar_url from Supabase on mount so it shows on first load
+  const [remoteAvatarUrl, setRemoteAvatarUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (mode !== "managed" || !supabase || !user) return;
+    supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("id", user.id)
+      .single()
+      .then(({ data }) => { if (data?.avatar_url) setRemoteAvatarUrl(data.avatar_url); });
+  }, [mode, user]);
+
   const profile = loadProfile();
 
   // Determine what to show in the avatar
+  // Priority: localStorage cache (updated immediately on save) > remoteAvatarUrl (initial load fallback) > initials > icon
   const avatarContent = (() => {
-    if (profile.avatarDataUrl) {
+    const avatarSrc = profile.avatarDataUrl ?? remoteAvatarUrl;
+    if (avatarSrc) {
       return (
         <img
-          src={profile.avatarDataUrl}
+          src={avatarSrc}
           alt="Profile"
           className="h-full w-full object-cover"
         />
