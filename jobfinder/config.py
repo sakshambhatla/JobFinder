@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -89,7 +90,11 @@ def load_config(config_path: str | None = None, **overrides: object) -> AppConfi
 
 
 def require_api_key(provider: str) -> str:
-    """Ensure the correct API key env var is set for the given provider."""
+    """Ensure the correct API key env var is set for the given provider.
+
+    Used by the **CLI** path where there is no authenticated user context.
+    For the API server, use :func:`resolve_api_key` instead.
+    """
     if provider == "gemini":
         key = os.environ.get("GEMINI_API_KEY")
         if not key:
@@ -107,3 +112,38 @@ def require_api_key(provider: str) -> str:
                 "Get a key at: https://console.anthropic.com"
             )
     return key
+
+
+def resolve_api_key(provider: str, user_id: str | None = None) -> str:
+    """Resolve an LLM API key: user Vault → server env var fallback.
+
+    Used by **API routes** where an authenticated user may have stored
+    their own key in Supabase Vault.  Falls back to the server-level
+    environment variable when no user key is found (or when running in
+    local / unauthenticated mode).
+
+    Raises ``ValueError`` if no key can be resolved from either source.
+    """
+    env_var = "GEMINI_API_KEY" if provider == "gemini" else "ANTHROPIC_API_KEY"
+
+    # 1. Try user-specific key from Vault (managed mode only).
+    if user_id and os.environ.get("SUPABASE_URL"):
+        try:
+            from jobfinder.storage.vault import get_api_key
+
+            vault_key = get_api_key(user_id, provider)
+            if vault_key:
+                return vault_key
+        except Exception as exc:
+            logging.warning("Vault lookup failed for user %s / %s: %s", user_id, provider, exc)
+
+    # 2. Server-level environment variable.
+    env_key = os.environ.get(env_var)
+    if env_key:
+        return env_key
+
+    raise ValueError(
+        f"No {provider} API key available. "
+        "Store your key in Settings (managed mode) or set the "
+        f"{env_var} environment variable."
+    )

@@ -10,7 +10,7 @@ from jobfinder.api.auth import get_current_user
 from jobfinder.api.models import DiscoverCompaniesRequest
 from jobfinder.companies.discovery import discover_companies
 from jobfinder.company_runs.name_generator import generate_run_name
-from jobfinder.config import load_config, require_api_key
+from jobfinder.config import load_config, resolve_api_key
 from jobfinder.storage import get_storage_backend
 from jobfinder.storage.registry import load_or_bootstrap_registry, upsert_registry
 from jobfinder.storage.schemas import DiscoveredCompany
@@ -22,9 +22,11 @@ router = APIRouter()
 @router.post("/companies/discover")
 async def discover_companies_endpoint(
     req: DiscoverCompaniesRequest,
-    user_id: str | None = Depends(get_current_user),
+    _auth: tuple[str, str] | None = Depends(get_current_user),
 ) -> dict:
     """Run LLM-based company discovery and return the results."""
+    user_id, jwt_token = _auth if _auth else (None, None)
+
     overrides: dict = {}
     if req.max_companies is not None:
         overrides["max_companies"] = req.max_companies
@@ -33,12 +35,12 @@ async def discover_companies_endpoint(
 
     config = load_config(**overrides)
     sys_config = load_system_config()
-    store = get_storage_backend(user_id)
+    store = get_storage_backend(user_id, jwt_token)
 
-    # Ensure API key is present before starting
+    # Resolve API key: user Vault → server env var fallback
     try:
-        require_api_key(config.model_provider)
-    except SystemExit as exc:
+        api_key = resolve_api_key(config.model_provider, user_id)
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     seed_companies = req.seed_companies or None
@@ -71,7 +73,7 @@ async def discover_companies_endpoint(
     # Run blocking LLM call in a thread pool
     try:
         companies = await asyncio.to_thread(
-            discover_companies, resumes, config, seed_companies=seed_companies
+            discover_companies, resumes, config, seed_companies=seed_companies, api_key=api_key
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Company discovery failed: {exc}") from exc
@@ -132,16 +134,18 @@ async def discover_companies_endpoint(
 
 
 @router.get("/companies/registry")
-async def get_company_registry(user_id: str | None = Depends(get_current_user)) -> dict:
+async def get_company_registry(_auth: tuple[str, str] | None = Depends(get_current_user)) -> dict:
     """Return all companies from the perpetual registry (per-user)."""
-    store = get_storage_backend(user_id)
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
     return {"companies": load_or_bootstrap_registry(store)}
 
 
 @router.get("/companies")
-async def get_companies(user_id: str | None = Depends(get_current_user)) -> dict:
+async def get_companies(_auth: tuple[str, str] | None = Depends(get_current_user)) -> dict:
     """Return cached company discovery results."""
-    store = get_storage_backend(user_id)
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
     data = store.read("companies.json")
     if data is None:
         raise HTTPException(status_code=404, detail="No companies found. Run discovery first.")

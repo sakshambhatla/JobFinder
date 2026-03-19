@@ -20,7 +20,7 @@ router = APIRouter()
 @router.get("/logs/stream")
 async def stream_logs(
     request: Request,
-    user_id: str | None = Depends(get_current_user),
+    _auth: tuple[str, str] | None = Depends(get_current_user),
 ):
     """Stream log entries as SSE events.
 

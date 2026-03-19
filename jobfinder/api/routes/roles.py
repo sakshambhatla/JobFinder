@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from jobfinder.api.auth import get_current_user
 from jobfinder.api.models import DiscoverRolesRequest, FetchBrowserRolesRequest
-from jobfinder.config import AppConfig, RoleFilters, load_config, require_api_key
+from jobfinder.company_runs.name_generator import generate_run_name
+from jobfinder.config import AppConfig, RoleFilters, load_config, resolve_api_key
 from jobfinder.roles.checkpoint import Checkpoint
 from jobfinder.roles.discovery import discover_roles
 from jobfinder.roles.errors import RateLimitError
+from jobfinder.roles.metrics import RunMetricsCollector
 from jobfinder.storage import get_storage_backend
 from jobfinder.storage.backend import StorageBackend
 from jobfinder.storage.registry import load_or_bootstrap_registry
-from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole
+from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole, JobRun
+from jobfinder.system_config import load_system_config
+from jobfinder.utils.log_stream import get_logs_for_run, set_run_context
 
 router = APIRouter()
 
@@ -74,6 +79,8 @@ async def _score_browser_roles(
     company_name: str,
     config: AppConfig,
     store: StorageBackend,
+    *,
+    api_key: str | None = None,
 ) -> int:
     """Score all stored roles for *company_name*.  Returns count of scored roles."""
     if not config.relevance_score_criteria:
@@ -87,7 +94,8 @@ async def _score_browser_roles(
         return 0
     try:
         scored = await asyncio.to_thread(
-            score_roles, company_roles, config.relevance_score_criteria, config
+            score_roles, company_roles, config.relevance_score_criteria, config,
+            api_key=api_key,
         )
     except Exception:
         return 0
@@ -97,11 +105,47 @@ async def _score_browser_roles(
     return len(scored)
 
 
+def _persist_job_run(
+    store: StorageBackend,
+    job_run_id: str,
+    run_name: str,
+    company_run_id: str | None,
+    companies_input: list[str],
+    collector: RunMetricsCollector,
+    started_at: str,
+    *,
+    status: str = "completed",
+    parent_job_run_id: str | None = None,
+    run_type: str = "api",
+    existing_runs: list[dict] | None = None,
+) -> None:
+    """Build a JobRun from the collector and persist to job_runs.json."""
+    sys_config = load_system_config()
+    max_runs = sys_config.max_job_runs_per_user
+
+    job_run = JobRun(
+        id=job_run_id,
+        run_name=run_name,
+        company_run_id=company_run_id,
+        parent_job_run_id=parent_job_run_id,
+        run_type=run_type,
+        status=status,
+        companies_input=companies_input,
+        metrics=collector.to_schema(),
+        created_at=started_at,
+        completed_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    runs = existing_runs if existing_runs is not None else (store.read("job_runs.json") or [])
+    runs = [job_run.model_dump()] + runs
+    store.write("job_runs.json", runs[:max_runs])
+
+
 @router.post("/roles/discover")
 async def discover_roles_endpoint(
     req: DiscoverRolesRequest,
     request: Request,
-    user_id: str | None = Depends(get_current_user),
+    _auth: tuple[str, str] | None = Depends(get_current_user),
 ) -> dict:
     """Fetch open roles from ATS APIs, then apply filters and scoring.
 
@@ -112,6 +156,8 @@ async def discover_roles_endpoint(
     Set ``company_names`` to fetch roles only for specific companies from the
     registry.  Omit to use all companies from the last discovery run.
     """
+    user_id, jwt_token = _auth if _auth else (None, None)
+
     overrides: dict = {}
     if req.model_provider is not None:
         overrides["model_provider"] = req.model_provider
@@ -123,8 +169,20 @@ async def discover_roles_endpoint(
         overrides["skip_career_page"] = req.skip_career_page
 
     config = load_config(**overrides)
-    store = get_storage_backend(user_id)
+    store = get_storage_backend(user_id, jwt_token)
     cp = _make_checkpoint(store)
+
+    # ── Create job run ────────────────────────────────────────────────────
+    job_run_id = str(uuid.uuid4())
+    existing_job_runs: list[dict] = store.read("job_runs.json") or []
+    existing_run_names = {r.get("run_name", "") for r in existing_job_runs}
+    # Also exclude company-run names for uniqueness
+    existing_company_runs: list[dict] = store.read("company_runs.json") or []
+    existing_run_names.update(r.get("run_name", "") for r in existing_company_runs)
+    job_run_name = generate_run_name(existing_run_names)
+    started_at = datetime.now(timezone.utc).isoformat()
+    collector = RunMetricsCollector()
+    set_run_context(job_run_id)
 
     companies_data = store.read("companies.json")
 
@@ -148,16 +206,17 @@ async def discover_roles_endpoint(
         )
     companies_data = companies_data or {}
 
-    # Ensure API key is present if LLM features are needed.
+    # Resolve API key if LLM features are needed.
     # Skip the check when using local (fuzzy/semantic) filtering — no API calls needed.
+    api_key: str | None = None
     _local_strategy = (
         config.role_filters is not None
         and getattr(config.role_filters, "filter_strategy", "llm") in ("fuzzy", "semantic")
     )
     if (config.role_filters and not _local_strategy) or config.relevance_score_criteria:
         try:
-            require_api_key(config.model_provider)
-        except SystemExit as exc:
+            api_key = resolve_api_key(config.model_provider, user_id)
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # ── Determine whether to resume or start fresh ────────────────────────────
@@ -218,8 +277,14 @@ async def discover_roles_endpoint(
             roles, flagged = await asyncio.to_thread(
                 discover_roles, companies, config,
                 store=store, use_cache=effective_use_cache, on_progress=_on_progress,
+                metrics=collector,
             )
         except Exception as exc:
+            _persist_job_run(
+                store, job_run_id, job_run_name, req.company_run_id,
+                [c.name for c in companies], collector, started_at,
+                status="failed", existing_runs=existing_job_runs,
+            )
             raise HTTPException(
                 status_code=500, detail=f"Role discovery failed: {exc}"
             ) from exc
@@ -266,6 +331,8 @@ async def discover_roles_endpoint(
                 checkpoint=cp,
                 resume_batches=resume_filter_batches,
                 resume_kept=resume_filter_kept,
+                api_key=api_key,
+                metrics=collector,
             )
         except RateLimitError as exc:
             raise HTTPException(
@@ -289,6 +356,8 @@ async def discover_roles_endpoint(
                 config,
                 checkpoint=cp,
                 resume_batches=resume_score_batches,
+                api_key=api_key,
+                metrics=collector,
             )
         except RateLimitError as exc:
             raise HTTPException(
@@ -321,19 +390,30 @@ async def discover_roles_endpoint(
         "companies_flagged": len(flagged_dicts),
         "flagged_companies": flagged_dicts,
         "roles": [r.model_dump() for r in final_roles],
+        "job_run_id": job_run_id,
+        "job_run_name": job_run_name,
     }
     store.write("roles.json", output)
 
     # Clean up checkpoint — complete result is now in roles.json
     cp.delete()
 
+    # ── Persist job run ───────────────────────────────────────────────────
+    _persist_job_run(
+        store, job_run_id, job_run_name, req.company_run_id,
+        [c.name for c in companies], collector, started_at,
+        status="completed", existing_runs=existing_job_runs,
+    )
+    set_run_context(None)
+
     return output
 
 
 @router.get("/roles/unfiltered")
-async def get_unfiltered_roles(user_id: str | None = Depends(get_current_user)) -> dict:
+async def get_unfiltered_roles(_auth: tuple[str, str] | None = Depends(get_current_user)) -> dict:
     """Return raw/unfiltered role discovery results."""
-    store = get_storage_backend(user_id)
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
     data = store.read("roles_unfiltered.json")
     if data is None:
         raise HTTPException(status_code=404, detail="No unfiltered roles found.")
@@ -341,9 +421,10 @@ async def get_unfiltered_roles(user_id: str | None = Depends(get_current_user)) 
 
 
 @router.get("/roles/checkpoint")
-async def get_roles_checkpoint(user_id: str | None = Depends(get_current_user)) -> dict:
+async def get_roles_checkpoint(_auth: tuple[str, str] | None = Depends(get_current_user)) -> dict:
     """Return summary of any saved checkpoint, or 404 if none exists."""
-    store = get_storage_backend(user_id)
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
     cp = _make_checkpoint(store)
     if not cp.exists():
         raise HTTPException(status_code=404, detail="No checkpoint found.")
@@ -360,9 +441,10 @@ async def get_roles_checkpoint(user_id: str | None = Depends(get_current_user)) 
 
 
 @router.get("/roles")
-async def get_roles(user_id: str | None = Depends(get_current_user)) -> dict:
+async def get_roles(_auth: tuple[str, str] | None = Depends(get_current_user)) -> dict:
     """Return cached role discovery results."""
-    store = get_storage_backend(user_id)
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
     data = store.read("roles.json")
     if data is None:
         raise HTTPException(status_code=404, detail="No roles found. Run discovery first.")
@@ -374,7 +456,8 @@ async def stream_browser_fetch(
     company_name: str,
     request: Request,
     career_page_url_override: str | None = None,
-    user_id: str | None = Depends(get_current_user),
+    parent_job_run_id: str | None = None,
+    _auth: tuple[str, str] | None = Depends(get_current_user),
 ):
     """Stream real-time browser-agent progress for a flagged company via SSE.
 
@@ -402,8 +485,16 @@ async def stream_browser_fetch(
     from jobfinder.roles.ats.browser_session import AgentMetrics, AgentSession
     from jobfinder.roles.ats.career_page import _run_browser_agent_streaming
 
+    user_id, jwt_token = _auth if _auth else (None, None)
+
     config = load_config()
-    store = get_storage_backend(user_id)
+    store = get_storage_backend(user_id, jwt_token)
+
+    # Resolve API key for LLM calls (browser agent, filters, scoring)
+    try:
+        api_key = resolve_api_key(config.model_provider, user_id)
+    except ValueError:
+        api_key = None  # Browser agent may not need LLM for all operations
 
     # ── Registry lookup ───────────────────────────────────────────────────────
 
@@ -424,6 +515,17 @@ async def stream_browser_fetch(
                 f"Pass career_page_url_override to provide one."
             ),
         )
+
+    # ── Job run setup ────────────────────────────────────────────────────────
+
+    browser_job_run_id = str(uuid.uuid4())
+    browser_existing_runs: list[dict] = store.read("job_runs.json") or []
+    browser_existing_names = {r.get("run_name", "") for r in browser_existing_runs}
+    browser_run_name = generate_run_name(browser_existing_names)
+    browser_started_at = datetime.now(timezone.utc).isoformat()
+    browser_collector = RunMetricsCollector()
+    browser_collector.companies_total = 1
+    set_run_context(browser_job_run_id)
 
     # ── Session setup ─────────────────────────────────────────────────────────
 
@@ -458,7 +560,8 @@ async def stream_browser_fetch(
         filters_for_agent = config.role_filters.model_copy(update={"posted_after": None})
         try:
             filtered = await asyncio.to_thread(
-                filter_roles, roles_objs, filters_for_agent, config
+                filter_roles, roles_objs, filters_for_agent, config,
+                api_key=api_key,
             )
         except Exception:
             return
@@ -478,13 +581,23 @@ async def stream_browser_fetch(
     # ── Start agent background task ───────────────────────────────────────────
 
     session.task = asyncio.create_task(
-        _run_browser_agent_streaming(entry["name"], career_page_url, config, session, store)
+        _run_browser_agent_streaming(entry["name"], career_page_url, config, session, store, api_key=api_key)
     )
 
     # ── SSE generator ─────────────────────────────────────────────────────────
 
     async def event_generator():
         pending_filter_tasks: list[asyncio.Task] = []
+        # Emit run_start so the client knows the job_run_id
+        yield {
+            "event": "run_start",
+            "data": json.dumps({
+                "type": "run_start",
+                "job_run_id": browser_job_run_id,
+                "run_name": browser_run_name,
+                "parent_job_run_id": parent_job_run_id,
+            }),
+        }
         try:
             while True:
                 # Kill agent when client disconnects
@@ -563,7 +676,7 @@ async def stream_browser_fetch(
                 # 3. Apply scoring (skip on "error" — roles may be incomplete)
                 if event_type != "error" and config.relevance_score_criteria:
                     try:
-                        n_scored = await _score_browser_roles(entry["name"], config, store)
+                        n_scored = await _score_browser_roles(entry["name"], config, store, api_key=api_key)
                         if n_scored:
                             yield {
                                 "event": "score_result",
@@ -574,7 +687,24 @@ async def stream_browser_fetch(
                     except Exception:
                         pass
 
-                # 4. Now yield the terminal event — client calls onDone() after scoring
+                # 4. Persist browser job run metrics
+                _status = {"done": "completed", "killed": "killed", "error": "failed"}.get(
+                    event_type, "completed"
+                )
+                n_jobs = len(session.partial_roles)
+                browser_collector.record_browser_agent(entry["name"], n_jobs)
+                if n_jobs > 0:
+                    browser_collector.companies_succeeded = 1
+                else:
+                    browser_collector.companies_failed = 1
+                _persist_job_run(
+                    store, browser_job_run_id, browser_run_name, None,
+                    [entry["name"]], browser_collector, browser_started_at,
+                    status=_status, parent_job_run_id=parent_job_run_id,
+                    run_type="browser", existing_runs=browser_existing_runs,
+                )
+
+                # 5. Now yield the terminal event — client calls onDone() after scoring
                 yield {"event": event_type, "data": json.dumps(event)}
                 break
 
@@ -584,6 +714,7 @@ async def stream_browser_fetch(
                 if not t.done():
                     t.cancel()
             request.app.state.running_agents.pop((user_id, entry["name"]), None)
+            set_run_context(None)
 
     return EventSourceResponse(event_generator())
 
@@ -592,12 +723,13 @@ async def stream_browser_fetch(
 async def kill_browser_fetch(
     company_name: str,
     request: Request,
-    user_id: str | None = Depends(get_current_user),
+    _auth: tuple[str, str] | None = Depends(get_current_user),
 ) -> dict:
     """Kill a running browser-use agent by company name.
 
     Returns ``{killed, partial_jobs}`` on success; 404 if no agent is running.
     """
+    user_id = _auth[0] if _auth else None
     running: dict = request.app.state.running_agents
 
     # Exact match first, then case-insensitive fallback — scoped to this user
@@ -626,7 +758,7 @@ async def kill_browser_fetch(
 async def fetch_browser_roles(
     req: FetchBrowserRolesRequest,
     request: Request,
-    user_id: str | None = Depends(get_current_user),
+    _auth: tuple[str, str] | None = Depends(get_current_user),
 ) -> dict:
     """Use a browser-use agent to fetch roles for a single flagged company.
 
@@ -635,8 +767,15 @@ async def fetch_browser_roles(
 
     Returns ``{ company_name, roles_found, roles }``.
     """
+    user_id, jwt_token = _auth if _auth else (None, None)
     config = load_config()
-    store = get_storage_backend(user_id)
+    store = get_storage_backend(user_id, jwt_token)
+
+    # Resolve API key for browser agent LLM
+    try:
+        api_key = resolve_api_key(config.model_provider, user_id)
+    except ValueError:
+        api_key = None
 
     # Look up the company in the per-user registry
     registry: list[dict] = load_or_bootstrap_registry(store)
@@ -681,7 +820,7 @@ async def fetch_browser_roles(
 
     # Apply relevance scoring to the newly stored roles
     if config.relevance_score_criteria:
-        await _score_browser_roles(entry["name"], config, store)
+        await _score_browser_roles(entry["name"], config, store, api_key=api_key)
 
     return {
         "company_name": entry["name"],

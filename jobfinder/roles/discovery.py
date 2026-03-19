@@ -8,6 +8,7 @@ from jobfinder.roles.ats import get_fetcher
 from jobfinder.roles.ats.base import ATSFetchError, UnsupportedATSError
 from jobfinder.roles.ats.career_page import fetch_career_page_roles
 from jobfinder.roles.cache import RolesCache
+from jobfinder.roles.metrics import RunMetricsCollector
 from jobfinder.storage.backend import StorageBackend
 from jobfinder.storage.registry import update_registry_searchable
 from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole, FlaggedCompany
@@ -25,6 +26,7 @@ def discover_roles(
     store: StorageBackend,
     use_cache: bool = False,
     on_progress: ProgressCallback | None = None,
+    metrics: RunMetricsCollector | None = None,
 ) -> tuple[list[DiscoveredRole], list[FlaggedCompany]]:
     """Fetch roles from all companies. Returns (roles, flagged_companies).
 
@@ -44,6 +46,8 @@ def discover_roles(
 
     # ── Pass 1: ATS API fetch ────────────────────────────────────────────────
     n_companies = len(companies)
+    if metrics:
+        metrics.companies_total = n_companies
     log(
         f"\n[bold]Pass 1 — ATS API[/bold] "
         f"({n_companies} {'company' if n_companies == 1 else 'companies'}): "
@@ -71,6 +75,8 @@ def discover_roles(
                 roles = fetcher.fetch(company, config.request_timeout)
                 all_roles.extend(roles)
                 cache.put(company.name, company.ats_type, roles)
+                if metrics:
+                    metrics.record_ats_fetch(company.name, company.ats_type, len(roles))
                 log(
                     f"  [green]✓ {company.name}[/green]: {len(roles)} roles "
                     f"via [cyan]{company.ats_type.upper()}[/cyan] API",
@@ -79,14 +85,17 @@ def discover_roles(
                 if on_progress:
                     on_progress(all_roles, flagged)
             except UnsupportedATSError:
+                reason = f"{company.ats_type} does not have a public API for automated fetching"
                 flagged.append(
                     FlaggedCompany(
                         name=company.name,
                         ats_type=company.ats_type,
                         career_page_url=company.career_page_url,
-                        reason=f"{company.ats_type} does not have a public API for automated fetching",
+                        reason=reason,
                     )
                 )
+                if metrics:
+                    metrics.record_ats_failure(company.name, company.ats_type, reason)
                 display_warning(
                     f"{company.name}: {company.ats_type} ATS has no public API — "
                     f"flagged (try 'Fetch via Browser Agent')"
@@ -100,6 +109,8 @@ def discover_roles(
                         reason=str(exc),
                     )
                 )
+                if metrics:
+                    metrics.record_ats_failure(company.name, company.ats_type, str(exc))
                 display_warning(f"{company.name}: {exc}")
             except Exception as exc:
                 flagged.append(
@@ -110,6 +121,8 @@ def discover_roles(
                         reason=f"Unexpected error: {exc}",
                     )
                 )
+                if metrics:
+                    metrics.record_ats_failure(company.name, company.ats_type, str(exc))
                 display_warning(f"{company.name}: Unexpected error — {exc}")
 
     # ── Pass 1 summary ───────────────────────────────────────────────────────
@@ -196,6 +209,8 @@ def discover_roles(
                     existing_urls.update(r.url for r in new_roles if r.url)
                 cache.put(company.name, "career_page", cp_roles)
                 searchable = bool(cp_roles)
+                if metrics:
+                    metrics.record_career_page(company.name, len(cp_roles))
                 if is_fallback and cp_roles:
                     flagged = [f for f in flagged if f.name.lower() != company.name.lower()]
                     flagged_names.discard(company.name.lower())
@@ -220,6 +235,8 @@ def discover_roles(
                         f"try 'Fetch via Browser Agent' for agentic extraction"
                     )
             except Exception as exc:
+                if metrics:
+                    metrics.record_career_page_failure(company.name, str(exc))
                 if is_fallback:
                     display_warning(
                         f"{company.name}: ATS failed and career page also unreachable — {exc}"

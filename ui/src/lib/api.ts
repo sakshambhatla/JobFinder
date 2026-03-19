@@ -344,6 +344,37 @@ export async function browserAgentStreamUrl(
   return url;
 }
 
+// ─── API Keys (Settings) ──────────────────────────────────────────────────────
+
+export interface ApiKeyStatus {
+  anthropic: boolean;
+  gemini: boolean;
+}
+
+export async function getApiKeyStatus(): Promise<ApiKeyStatus> {
+  const { data } = await api.get<ApiKeyStatus>("/settings/api-keys");
+  return data;
+}
+
+export async function storeApiKey(
+  provider: "anthropic" | "gemini",
+  apiKey: string
+): Promise<void> {
+  await api.post("/settings/api-keys", { provider, api_key: apiKey });
+}
+
+export async function deleteApiKey(
+  provider: "anthropic" | "gemini"
+): Promise<void> {
+  await api.delete(`/settings/api-keys/${provider}`);
+}
+
+export async function validateStoredApiKey(
+  provider: "anthropic" | "gemini"
+): Promise<void> {
+  await api.post(`/settings/api-keys/${provider}/validate`);
+}
+
 /** Send a kill signal to a running browser agent. */
 export async function killBrowserAgent(
   company_name: string

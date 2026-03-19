@@ -5,12 +5,28 @@ log stream endpoint is disabled to prevent cross-user data leakage.
 """
 from __future__ import annotations
 
+import contextvars
 import os
 import re
 import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+
+# ── Run ID context (auto-propagated to threads by asyncio.to_thread) ─────
+
+_current_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_run_id", default=None
+)
+
+
+def set_run_context(run_id: str | None) -> None:
+    """Set the active job-run ID for the current context.
+
+    All subsequent ``log()`` calls in this context (including threads spawned
+    by ``asyncio.to_thread``) will be tagged with this run ID.
+    """
+    _current_run_id.set(run_id)
 
 # ── Ring buffer (thread-safe reads via lock) ────────────────────────────────
 
@@ -50,14 +66,18 @@ def init_log_stream(data_dir: Path) -> Path:
     return _log_file_path
 
 
-def log(message: str, level: str = "info") -> None:
+def log(message: str, level: str = "info", *, run_id: str | None = None) -> None:
     """Log a message to Rich console, log file, AND the SSE ring buffer.
 
     Args:
         message: Rich-formatted string (markup preserved for console output).
         level: One of ``"info"``, ``"success"``, ``"warning"``, ``"error"``.
+        run_id: Explicit run ID override.  Falls back to the contextvar set
+                via ``set_run_context()``.
     """
     global _log_counter
+
+    effective_run_id = run_id or _current_run_id.get(None)
 
     # 1. Console output (unchanged Rich behaviour)
     from jobfinder.utils.display import console
@@ -73,9 +93,12 @@ def log(message: str, level: str = "info") -> None:
 
     # 3. Write to log file (thread-safe)
     if _log_file_path is not None:
+        prefix = f"[{timestamp}] [{level.upper()}]"
+        if effective_run_id:
+            prefix += f" [run:{effective_run_id[:8]}]"
         with _file_lock:
             with open(_log_file_path, "a") as f:
-                f.write(f"[{timestamp}] [{level.upper()}] {plain}\n")
+                f.write(f"{prefix} {plain}\n")
 
     # 4. Push to ring buffer (thread-safe) — skip in managed mode
     if not os.environ.get("SUPABASE_URL"):
@@ -85,6 +108,7 @@ def log(message: str, level: str = "info") -> None:
                 "timestamp": timestamp,
                 "level": level,
                 "message": plain,
+                "run_id": effective_run_id,
             }
             _log_buffer.append(entry)
             _log_counter += 1
@@ -105,3 +129,9 @@ def get_current_seq() -> int:
     """Return the current sequence counter (for initialising a new SSE client)."""
     with _log_lock:
         return _log_counter
+
+
+def get_logs_for_run(run_id: str) -> list[dict]:
+    """Return all buffered log entries tagged with *run_id*."""
+    with _log_lock:
+        return [e for e in _log_buffer if e.get("run_id") == run_id]

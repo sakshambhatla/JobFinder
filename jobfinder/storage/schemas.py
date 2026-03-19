@@ -90,3 +90,41 @@ class CompanyRun(BaseModel):
     seed_companies: list[str] | None = None  # original seed input, for reference
     companies: list[DiscoveredCompany] = []
     created_at: str = ""
+
+
+class JobRunMetrics(BaseModel):
+    """Quantitative metrics collected during a single role-discovery run."""
+    companies_total: int = 0
+    companies_succeeded: int = 0
+    companies_failed: int = 0
+
+    ats_visits: dict[str, int] = {}        # e.g. {"greenhouse": 3, "lever": 2}
+    jobs_per_ats: dict[str, int] = {}      # e.g. {"greenhouse": 45}
+    jobs_per_company: dict[str, int] = {}  # e.g. {"Stripe": 30}
+
+    playwright_uses: int = 0
+    browser_agent_uses: int = 0
+
+    total_roles_fetched: int = 0
+    total_roles_after_filter: int = 0
+    total_roles_after_score: int = 0
+
+    filter_batches: int = 0
+    score_batches: int = 0
+
+    errors: list[str] = []
+    elapsed_seconds: float = 0.0
+
+
+class JobRun(BaseModel):
+    """A single role-discovery run, persisted per user."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    run_name: str
+    company_run_id: str | None = None      # link to source CompanyRun
+    parent_job_run_id: str | None = None   # browser agent → API run that flagged the company
+    run_type: str = "api"                  # "api" | "browser"
+    status: str = "running"                # running | completed | failed | killed
+    companies_input: list[str] = []
+    metrics: JobRunMetrics = Field(default_factory=JobRunMetrics)
+    created_at: str = ""
+    completed_at: str | None = None

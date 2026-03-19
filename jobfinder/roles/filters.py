@@ -10,6 +10,7 @@ import time
 from jobfinder.config import AppConfig, RoleFilters
 from jobfinder.roles.checkpoint import Checkpoint
 from jobfinder.roles.errors import RateLimitError
+from jobfinder.roles.metrics import RunMetricsCollector
 from jobfinder.storage.schemas import DiscoveredRole
 from jobfinder.utils.display import console
 from jobfinder.utils.log_stream import log
@@ -81,22 +82,22 @@ def _make_system_prompt(filters: RoleFilters) -> str:
     )
 
 
-def _call_llm(prompt: str, filters: RoleFilters, config: AppConfig) -> list[int]:
+def _call_llm(prompt: str, filters: RoleFilters, config: AppConfig, *, api_key: str | None = None) -> list[int]:
     system_prompt = _make_system_prompt(filters)
     if config.model_provider == "gemini":
-        raw = _call_gemini(prompt, system_prompt, config)
+        raw = _call_gemini(prompt, system_prompt, config, api_key=api_key)
     else:
-        raw = _call_anthropic(prompt, system_prompt, config)
+        raw = _call_anthropic(prompt, system_prompt, config, api_key=api_key)
     return _parse_indices(raw)
 
 
-def _call_anthropic(prompt: str, system_prompt: str, config: AppConfig) -> str:
+def _call_anthropic(prompt: str, system_prompt: str, config: AppConfig, *, api_key: str | None = None) -> str:
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
 
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(**({"api_key": api_key} if api_key else {}))
     try:
         response = client.messages.create(
             model=config.anthropic_model,
@@ -109,7 +110,7 @@ def _call_anthropic(prompt: str, system_prompt: str, config: AppConfig) -> str:
     return response.content[0].text
 
 
-def _call_gemini(prompt: str, system_prompt: str, config: AppConfig, *, _attempt: int = 0) -> str:
+def _call_gemini(prompt: str, system_prompt: str, config: AppConfig, *, api_key: str | None = None, _attempt: int = 0) -> str:
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
 
@@ -117,7 +118,7 @@ def _call_gemini(prompt: str, system_prompt: str, config: AppConfig, *, _attempt
     from google.genai import types
     from google.genai.errors import ClientError
 
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+    client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY", ""))
     try:
         response = client.models.generate_content(
             model=config.gemini_model,
@@ -136,7 +137,7 @@ def _call_gemini(prompt: str, system_prompt: str, config: AppConfig, *, _attempt
                     f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
                 )
                 time.sleep(retry_wait)
-                return _call_gemini(prompt, system_prompt, config, _attempt=_attempt + 1)
+                return _call_gemini(prompt, system_prompt, config, api_key=api_key, _attempt=_attempt + 1)
 
             tip = (
                 "Daily quota resets at midnight Pacific. Try gemini_model='gemini-2.0-flash' or model_provider='anthropic'."
@@ -169,6 +170,8 @@ def filter_roles(
     checkpoint: Checkpoint | None = None,
     resume_batches: int = 0,
     resume_kept: list[DiscoveredRole] | None = None,
+    api_key: str | None = None,
+    metrics: RunMetricsCollector | None = None,
 ) -> list[DiscoveredRole]:
     """Apply LLM-based filters to a list of roles. Returns only high-confidence matches.
 
@@ -218,7 +221,7 @@ def filter_roles(
         ):
             prompt = _build_prompt(batch, filters)
             try:
-                indices = _call_llm(prompt, filters, config)
+                indices = _call_llm(prompt, filters, config, api_key=api_key)
             except RateLimitError as exc:
                 # Checkpoint progress before propagating so the caller can resume
                 if checkpoint:
@@ -237,4 +240,6 @@ def filter_roles(
         if checkpoint:
             checkpoint.save_filter_batch(batch_num, matched)
 
+    if metrics:
+        metrics.record_filter_result(len(matched), total_batches)
     return matched

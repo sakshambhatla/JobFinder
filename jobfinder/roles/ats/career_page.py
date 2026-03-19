@@ -219,7 +219,7 @@ def _fetch_html_playwright(url: str, timeout: int) -> str | None:
 # ── Browser-use LLM builder ──────────────────────────────────────────────────
 
 
-def _build_browser_llm(config: AppConfig):
+def _build_browser_llm(config: AppConfig, *, api_key: str | None = None):
     """Build a browser-use native LLM from the app config.
 
     browser-use 0.12+ ships its own LLM wrappers under ``browser_use.llm``
@@ -231,13 +231,13 @@ def _build_browser_llm(config: AppConfig):
 
         return ChatGoogle(
             model=config.gemini_model,
-            api_key=os.environ.get("GEMINI_API_KEY"),
+            api_key=api_key or os.environ.get("GEMINI_API_KEY"),
         )
     else:
         import os
         from browser_use.llm.anthropic.chat import ChatAnthropic  # type: ignore
 
-        return ChatAnthropic(model=config.anthropic_model, api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        return ChatAnthropic(model=config.anthropic_model, api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
 
 
 # ── Task prompt builder ──────────────────────────────────────────────────────
@@ -419,6 +419,8 @@ async def _run_browser_agent_streaming(
     config: AppConfig,
     session,  # AgentSession
     store,    # StorageBackend
+    *,
+    api_key: str | None = None,
 ) -> None:
     """Run the browser-use agent with live streaming to *session*.
 
@@ -437,7 +439,7 @@ async def _run_browser_agent_streaming(
     from jobfinder.storage.api_profiles import load_profile
 
     known_profile = load_profile(career_page_url, store)
-    base_llm = _build_browser_llm(config)
+    base_llm = _build_browser_llm(config, api_key=api_key)
     wrapped_llm = _StreamingLLMWrapper(base_llm, session)
     task_prompt = _build_task_prompt(company_name, career_page_url, known_profile, config)
 
@@ -616,20 +618,20 @@ def fetch_career_page_roles_browser(
 # ── LLM call helpers ─────────────────────────────────────────────────────────
 
 
-def _call_llm(html: str, config: AppConfig) -> str:
+def _call_llm(html: str, config: AppConfig, *, api_key: str | None = None) -> str:
     if config.model_provider == "gemini":
-        return _call_gemini(html, config)
-    return _call_anthropic(html, config)
+        return _call_gemini(html, config, api_key=api_key)
+    return _call_anthropic(html, config, api_key=api_key)
 
 
-def _call_anthropic(html: str, config: AppConfig) -> str:
+def _call_anthropic(html: str, config: AppConfig, *, api_key: str | None = None) -> str:
     from jobfinder.utils.throttle import get_limiter
 
     get_limiter(config.rpm_limit).wait()
 
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(**({"api_key": api_key} if api_key else {}))
     result = client.messages.create(
         model=config.anthropic_model,
         max_tokens=4096,
@@ -644,7 +646,7 @@ def _call_anthropic(html: str, config: AppConfig) -> str:
     return result.content[0].text  # type: ignore[union-attr]
 
 
-def _call_gemini(html: str, config: AppConfig, *, _attempt: int = 0) -> str:
+def _call_gemini(html: str, config: AppConfig, *, api_key: str | None = None, _attempt: int = 0) -> str:
     import os
     import time
 
@@ -658,7 +660,7 @@ def _call_gemini(html: str, config: AppConfig, *, _attempt: int = 0) -> str:
 
     from jobfinder.utils.display import console
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY"))
     try:
         response = client.models.generate_content(
             model=config.gemini_model,
@@ -677,7 +679,7 @@ def _call_gemini(html: str, config: AppConfig, *, _attempt: int = 0) -> str:
                     f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
                 )
                 time.sleep(retry_wait)
-                return _call_gemini(html, config, _attempt=_attempt + 1)
+                return _call_gemini(html, config, api_key=api_key, _attempt=_attempt + 1)
             # Career page is best-effort — treat exhaustion as empty page, never raise
             return ""
         raise

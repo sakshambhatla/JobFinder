@@ -14,6 +14,7 @@ import { loadProfile } from "@/components/MyProfileModal";
 import { MyProfileModal } from "@/components/MyProfileModal";
 import { PreferencesModal } from "@/components/PreferencesModal";
 import { JobSearchPreferencesModal } from "@/components/JobSearchPreferencesModal";
+import { ApiKeysDialog } from "@/components/ApiKeysDialog";
 
 export function ProfileMenu() {
   const { mode, clearMode } = useMode();
@@ -22,6 +23,7 @@ export function ProfileMenu() {
   const [showProfile, setShowProfile] = useState(false);
   const [showLLMPrefs, setShowLLMPrefs] = useState(false);
   const [showJobPrefs, setShowJobPrefs] = useState(false);
+  const [showApiKeys, setShowApiKeys] = useState(false);
 
   // Force re-render when profile is saved (avatar may change)
   const [, setTick] = useState(0);
@@ -109,6 +111,11 @@ export function ProfileMenu() {
           <DropdownMenuItem onClick={() => setShowJobPrefs(true)}>
             Job Search Preferences
           </DropdownMenuItem>
+          {mode === "managed" && (
+            <DropdownMenuItem onClick={() => setShowApiKeys(true)}>
+              API Keys
+            </DropdownMenuItem>
+          )}
 
           <DropdownMenuSeparator />
 
@@ -132,6 +139,7 @@ export function ProfileMenu() {
       />
       <PreferencesModal open={showLLMPrefs} onOpenChange={setShowLLMPrefs} />
       <JobSearchPreferencesModal open={showJobPrefs} onOpenChange={setShowJobPrefs} />
+      <ApiKeysDialog open={showApiKeys} onOpenChange={setShowApiKeys} />
     </>
   );
 }

@@ -18,6 +18,9 @@ class SystemConfig(BaseModel):
     # Oldest runs are evicted when this limit is exceeded.
     max_company_runs_per_user: int = 20
 
+    # Maximum number of job (role-discovery) runs stored per user.
+    max_job_runs_per_user: int = 50
+
 
 _cached: SystemConfig | None = None
 

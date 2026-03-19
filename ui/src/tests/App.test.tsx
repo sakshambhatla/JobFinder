@@ -40,6 +40,9 @@ vi.mock("@/lib/api", () => ({
   fetchBrowserRoles: vi.fn(),
   browserAgentStreamUrl: vi.fn().mockResolvedValue("/api/roles/fetch-browser/stream"),
   killBrowserAgent: vi.fn(),
+  getApiKeyStatus: vi.fn().mockResolvedValue({ anthropic: false, gemini: false }),
+  storeApiKey: vi.fn(),
+  deleteApiKey: vi.fn(),
 }));
 
 // ── Seed local mode so ModeSelectionPage is bypassed in all tests ─────────────

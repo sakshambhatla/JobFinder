@@ -51,8 +51,8 @@ def _decode_jwt(raw_token: str) -> str:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     token: str | None = Query(None),
-) -> str | None:
-    """Return the authenticated user's UUID, or ``None`` in dev mode.
+) -> tuple[str, str] | None:
+    """Return ``(user_id, raw_jwt)`` for the authenticated user, or ``None`` in dev mode.
 
     Accepts the JWT from either:
       - ``Authorization: Bearer <token>`` header (standard REST calls)
@@ -69,4 +69,4 @@ async def get_current_user(
     if not raw_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    return _decode_jwt(raw_token)
+    return (_decode_jwt(raw_token), raw_token)

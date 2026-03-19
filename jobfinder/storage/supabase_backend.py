@@ -11,13 +11,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-def _supabase_client():
-    """Lazy import + client creation so the dependency is optional."""
+def _supabase_client(jwt_token: str):
+    """Lazy import + client creation so the dependency is optional.
+
+    Uses the publishable (anon) key so that Postgres RLS policies are
+    enforced.  The user's JWT is injected as the Authorization header via
+    ``postgrest.auth()``, making ``auth.uid()`` available to RLS expressions.
+    """
     from supabase import create_client
 
     url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SECRET_KEY"]
-    return create_client(url, key)
+    anon_key = os.environ["SUPABASE_PUBLISHABLE_KEY"]
+    client = create_client(url, anon_key)
+    client.postgrest.auth(jwt_token)
+    return client
 
 
 class SupabaseStorageBackend:
@@ -39,9 +46,9 @@ class SupabaseStorageBackend:
       - ``roles_checkpoint.json``  → ``checkpoints``
     """
 
-    def __init__(self, user_id: str) -> None:
+    def __init__(self, user_id: str, jwt_token: str) -> None:
         self._user_id = user_id
-        self._client = _supabase_client()
+        self._client = _supabase_client(jwt_token)
 
     # ── StorageBackend protocol ────────────────────────────────────────────────
 
@@ -127,6 +134,12 @@ class SupabaseStorageBackend:
                 "write": self._write_company_runs,
                 "exists": self._exists_company_runs,
                 "delete": self._delete_company_runs,
+            },
+            "job_runs.json": {
+                "read": self._read_job_runs,
+                "write": self._write_job_runs,
+                "exists": self._exists_job_runs,
+                "delete": self._delete_job_runs,
             },
         }
         return handlers.get(collection)
@@ -579,4 +592,65 @@ class SupabaseStorageBackend:
             "seed_companies": row.get("seed_companies"),
             "companies": row.get("companies", []),
             "created_at": row.get("created_at", ""),
+        }
+
+    # ── Job Runs ──────────────────────────────────────────────────────────────
+
+    def _read_job_runs(self) -> list | None:
+        resp = (
+            self._client.table("job_runs")
+            .select("*")
+            .eq("user_id", self._user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if not resp.data:
+            return None
+        return [self._row_to_job_run(r) for r in resp.data]
+
+    def _write_job_runs(self, data: list) -> None:
+        if not isinstance(data, list):
+            return
+        self._client.table("job_runs").delete().eq("user_id", self._user_id).execute()
+        for run in data:
+            row = {
+                "id": run.get("id"),
+                "user_id": self._user_id,
+                "run_name": run.get("run_name", ""),
+                "company_run_id": run.get("company_run_id"),
+                "parent_job_run_id": run.get("parent_job_run_id"),
+                "run_type": run.get("run_type", "api"),
+                "status": run.get("status", "completed"),
+                "companies_input": run.get("companies_input", []),
+                "metrics": run.get("metrics", {}),
+                "created_at": run.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "completed_at": run.get("completed_at"),
+            }
+            self._client.table("job_runs").upsert(row, on_conflict="id").execute()
+
+    def _exists_job_runs(self) -> bool:
+        resp = (
+            self._client.table("job_runs")
+            .select("id", count="exact")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        return (resp.count or 0) > 0
+
+    def _delete_job_runs(self) -> None:
+        self._client.table("job_runs").delete().eq("user_id", self._user_id).execute()
+
+    @staticmethod
+    def _row_to_job_run(row: dict) -> dict:
+        return {
+            "id": row["id"],
+            "run_name": row.get("run_name", ""),
+            "company_run_id": row.get("company_run_id"),
+            "parent_job_run_id": row.get("parent_job_run_id"),
+            "run_type": row.get("run_type", "api"),
+            "status": row.get("status", "completed"),
+            "companies_input": row.get("companies_input", []),
+            "metrics": row.get("metrics", {}),
+            "created_at": row.get("created_at", ""),
+            "completed_at": row.get("completed_at"),
         }

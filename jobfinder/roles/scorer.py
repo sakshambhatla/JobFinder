@@ -10,6 +10,7 @@ import time
 from jobfinder.config import AppConfig
 from jobfinder.roles.checkpoint import Checkpoint
 from jobfinder.roles.errors import RateLimitError
+from jobfinder.roles.metrics import RunMetricsCollector
 from jobfinder.storage.schemas import DiscoveredRole
 from jobfinder.utils.display import console
 from jobfinder.utils.log_stream import log
@@ -51,13 +52,13 @@ def _build_prompt(roles: list[DiscoveredRole], criteria: str) -> str:
     )
 
 
-def _call_anthropic(prompt: str, config: AppConfig) -> str:
+def _call_anthropic(prompt: str, config: AppConfig, *, api_key: str | None = None) -> str:
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
 
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(**({"api_key": api_key} if api_key else {}))
     try:
         response = client.messages.create(
             model=config.anthropic_model,
@@ -70,7 +71,7 @@ def _call_anthropic(prompt: str, config: AppConfig) -> str:
     return response.content[0].text
 
 
-def _call_gemini(prompt: str, config: AppConfig, *, _attempt: int = 0) -> str:
+def _call_gemini(prompt: str, config: AppConfig, *, api_key: str | None = None, _attempt: int = 0) -> str:
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
 
@@ -78,7 +79,7 @@ def _call_gemini(prompt: str, config: AppConfig, *, _attempt: int = 0) -> str:
     from google.genai import types
     from google.genai.errors import ClientError
 
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+    client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY", ""))
     try:
         response = client.models.generate_content(
             model=config.gemini_model,
@@ -97,7 +98,7 @@ def _call_gemini(prompt: str, config: AppConfig, *, _attempt: int = 0) -> str:
                     f"[yellow]  Retrying in {retry_wait}s ({_attempt + 1}/3)...[/yellow]"
                 )
                 time.sleep(retry_wait)
-                return _call_gemini(prompt, config, _attempt=_attempt + 1)
+                return _call_gemini(prompt, config, api_key=api_key, _attempt=_attempt + 1)
 
             tip = (
                 "Daily quota resets at midnight Pacific. Try gemini_model='gemini-2.0-flash' or model_provider='anthropic'."
@@ -109,11 +110,11 @@ def _call_gemini(prompt: str, config: AppConfig, *, _attempt: int = 0) -> str:
     return response.text
 
 
-def _call_llm(prompt: str, config: AppConfig) -> dict[int, dict]:
+def _call_llm(prompt: str, config: AppConfig, *, api_key: str | None = None) -> dict[int, dict]:
     raw = (
-        _call_gemini(prompt, config)
+        _call_gemini(prompt, config, api_key=api_key)
         if config.model_provider == "gemini"
-        else _call_anthropic(prompt, config)
+        else _call_anthropic(prompt, config, api_key=api_key)
     )
     raw = raw.strip()
     start, end = raw.find("{"), raw.rfind("}")
@@ -143,6 +144,8 @@ def score_roles(
     *,
     checkpoint: Checkpoint | None = None,
     resume_batches: int = 0,
+    api_key: str | None = None,
+    metrics: RunMetricsCollector | None = None,
 ) -> list[DiscoveredRole]:
     """Score each role 1–10 and generate a summary, then sort highest-first.
 
@@ -173,7 +176,7 @@ def score_roles(
         ):
             prompt = _build_prompt(batch, criteria)
             try:
-                scores = _call_llm(prompt, config)
+                scores = _call_llm(prompt, config, api_key=api_key)
             except RateLimitError as exc:
                 # Checkpoint with whatever has been scored so far before propagating
                 if checkpoint:
@@ -192,4 +195,6 @@ def score_roles(
         if checkpoint:
             checkpoint.save_score_batch(batch_num, roles, total_batches)
 
+    if metrics:
+        metrics.record_score_result(len(roles), total_batches)
     return sorted(roles, key=lambda r: -(r.relevance_score or 0))

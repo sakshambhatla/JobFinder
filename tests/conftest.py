@@ -69,7 +69,7 @@ def client(tmp_data_dir: Path):
     def _patched_load_config(*a, **kw):
         return cfg
 
-    def _patched_get_storage_backend(user_id=None):
+    def _patched_get_storage_backend(user_id=None, jwt_token=None):
         return test_store
 
     # Patch load_config and get_storage_backend everywhere the routes call them

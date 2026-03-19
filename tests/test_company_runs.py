@@ -101,7 +101,7 @@ class TestDiscoverCreatesRun:
         async def fake_to_thread(fn, *args, **kwargs):
             return [fake_company]
 
-        with patch("jobfinder.api.routes.companies.require_api_key"), \
+        with patch("jobfinder.api.routes.companies.resolve_api_key", return_value="fake-key"), \
              patch("jobfinder.api.routes.companies.asyncio.to_thread", side_effect=fake_to_thread):
             response = client.post(
                 "/api/companies/discover",
