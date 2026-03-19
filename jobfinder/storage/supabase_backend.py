@@ -167,7 +167,6 @@ class SupabaseStorageBackend:
         for r in resumes:
             row = {
                 "user_id": self._user_id,
-                "resume_id": r.get("id") or r.get("resume_id"),
                 "filename": r.get("filename", ""),
                 "full_text": r.get("full_text", ""),
                 "skills": r.get("skills", []),
@@ -191,7 +190,7 @@ class SupabaseStorageBackend:
     @staticmethod
     def _row_to_resume(row: dict) -> dict:
         return {
-            "id": row.get("resume_id") or row.get("id", ""),
+            "id": row.get("id", ""),
             "filename": row["filename"],
             "full_text": row.get("full_text", ""),
             "sections": {},
@@ -283,7 +282,7 @@ class SupabaseStorageBackend:
         )
         for r in roles:
             row = self._role_to_row(r, is_filtered=True)
-            self._client.table("roles").upsert(row, on_conflict="user_id,url").execute()
+            self._client.table("roles").upsert(row, on_conflict="user_id,url,is_filtered").execute()
 
     def _exists_roles(self) -> bool:
         resp = (
@@ -330,7 +329,7 @@ class SupabaseStorageBackend:
         )
         for r in roles:
             row = self._role_to_row(r, is_filtered=False)
-            self._client.table("roles").upsert(row, on_conflict="user_id,url").execute()
+            self._client.table("roles").upsert(row, on_conflict="user_id,url,is_filtered").execute()
 
     def _exists_roles_unfiltered(self) -> bool:
         resp = (
@@ -413,7 +412,7 @@ class SupabaseStorageBackend:
                 "ats_type": c.get("ats_type", "unknown"),
                 "ats_board_token": c.get("ats_board_token"),
                 "career_page_url": c.get("career_page_url", ""),
-                "searchable": c.get("searchable"),
+                "searchable": c.get("searchable") or False,
             }
             self._client.table("company_registry").insert(row).execute()
 

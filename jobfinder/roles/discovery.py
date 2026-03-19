@@ -60,6 +60,8 @@ def discover_roles(
             if cached is not None:
                 all_roles.extend(cached)
                 age = cache.age_hours(company.name, company.ats_type) or 0
+                if cached:
+                    update_registry_searchable(store, company.name, True)
                 log(
                     f"  [dim]{company.name}[/dim]: "
                     f"{len(cached)} roles (cached {age:.0f}h ago)"
@@ -77,6 +79,7 @@ def discover_roles(
                 cache.put(company.name, company.ats_type, roles)
                 if metrics:
                     metrics.record_ats_fetch(company.name, company.ats_type, len(roles))
+                update_registry_searchable(store, company.name, True)
                 log(
                     f"  [green]✓ {company.name}[/green]: {len(roles)} roles "
                     f"via [cyan]{company.ats_type.upper()}[/cyan] API",
