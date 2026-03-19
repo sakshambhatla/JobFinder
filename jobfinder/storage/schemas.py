@@ -101,6 +101,7 @@ class JobRunMetrics(BaseModel):
     ats_visits: dict[str, int] = {}        # e.g. {"greenhouse": 3, "lever": 2}
     jobs_per_ats: dict[str, int] = {}      # e.g. {"greenhouse": 45}
     jobs_per_company: dict[str, int] = {}  # e.g. {"Stripe": 30}
+    career_page_per_company: dict[str, int] = {}  # company → roles found via Tier 2 scraping
 
     playwright_uses: int = 0
     browser_agent_uses: int = 0

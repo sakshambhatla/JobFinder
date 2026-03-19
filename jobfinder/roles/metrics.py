@@ -22,6 +22,7 @@ class RunMetricsCollector:
         self.ats_visits: dict[str, int] = {}
         self.jobs_per_ats: dict[str, int] = {}
         self.jobs_per_company: dict[str, int] = {}
+        self.career_page_per_company: dict[str, int] = {}
 
         self.playwright_uses: int = 0
         self.browser_agent_uses: int = 0
@@ -63,6 +64,7 @@ class RunMetricsCollector:
         self.jobs_per_company[company_name] = (
             self.jobs_per_company.get(company_name, 0) + role_count
         )
+        self.career_page_per_company[company_name] = role_count
         if role_count > 0:
             self.companies_succeeded += 1
         self.total_roles_fetched += role_count
@@ -102,6 +104,7 @@ class RunMetricsCollector:
             ats_visits=dict(self.ats_visits),
             jobs_per_ats=dict(self.jobs_per_ats),
             jobs_per_company=dict(self.jobs_per_company),
+            career_page_per_company=dict(self.career_page_per_company),
             playwright_uses=self.playwright_uses,
             browser_agent_uses=self.browser_agent_uses,
             total_roles_fetched=self.total_roles_fetched,

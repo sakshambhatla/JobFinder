@@ -12,6 +12,7 @@ import {
   browserAgentStreamUrl,
   discoverRoles,
   getCompanyRuns,
+  getJobRuns,
   killBrowserAgent,
   getRoles,
   getUnfilteredRoles,
@@ -21,6 +22,8 @@ import {
   type CompanyRunSummary,
   type DiscoveredRole,
   type FlaggedCompany,
+  type JobRun,
+  type JobRunMetrics,
   type RolesResponse,
   type CompanyRegistryEntry,
 } from "@/lib/api";
@@ -719,6 +722,164 @@ function CompanySourceCard({
   );
 }
 
+// ─── Job Run History ──────────────────────────────────────────────────────────
+
+const JOB_RUNS_PER_PAGE = 5;
+
+function tierCounts(metrics: JobRunMetrics): { t1: number; t2: number } {
+  const t2 = metrics.jobs_per_ats["career_page"] ?? 0;
+  const t1 = Object.entries(metrics.jobs_per_ats)
+    .filter(([k]) => k !== "career_page")
+    .reduce((sum, [, v]) => sum + v, 0);
+  return { t1, t2 };
+}
+
+function JobRunCard({ run }: { run: JobRun }) {
+  const [expanded, setExpanded] = useState(false);
+  const { t1, t2 } = tierCounts(run.metrics);
+  const cpEntries = Object.entries(run.metrics.career_page_per_company ?? {});
+  const date = new Date(run.created_at).toLocaleDateString(undefined, {
+    month: "short", day: "numeric", year: "numeric",
+  });
+
+  const statusColor =
+    run.status === "completed" ? "text-emerald-400" :
+    run.status === "failed" ? "text-red-400" :
+    run.status === "running" ? "text-yellow-400" :
+    "text-white/40";
+
+  return (
+    <div
+      className="rounded-xl border"
+      style={{
+        background: "rgba(255,255,255,0.05)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        borderColor: "rgba(255,255,255,0.12)",
+      }}
+    >
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-center gap-3 flex-wrap min-w-0">
+          <span className="font-semibold text-white text-sm">{run.run_name}</span>
+          <span className="text-xs text-white/55 tabular-nums">
+            T1: <span className="text-white/80">{t1}</span>
+          </span>
+          <span className={`text-xs tabular-nums ${t2 > 0 ? "text-amber-400 font-medium" : "text-white/25"}`}>
+            T2: {t2}
+          </span>
+          {run.metrics.playwright_uses > 0 && (
+            <Badge className="text-[10px] bg-white/8 text-white/45 border border-white/15">
+              {run.metrics.playwright_uses} scraped
+            </Badge>
+          )}
+          <span className="text-xs text-white/35">{date}</span>
+          <span className={`text-xs ${statusColor}`}>{run.status}</span>
+        </div>
+        <span className="text-white/40 text-sm ml-2 shrink-0">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4">
+          {cpEntries.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs text-white/40 mb-2 uppercase tracking-wide">Tier 2 companies</p>
+              {cpEntries.map(([company, count]) => (
+                <div key={company} className="flex items-center justify-between text-sm">
+                  <span className="text-white/70">{company}</span>
+                  <span className={`tabular-nums text-xs ${count > 0 ? "text-amber-400" : "text-white/30"}`}>
+                    {count} role{count !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-white/35 text-sm py-2">No Tier 2 scraping in this run.</p>
+          )}
+          <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-4 text-xs text-white/45">
+            <span>{run.metrics.companies_total} companies total</span>
+            <span>{run.metrics.total_roles_fetched} roles fetched</span>
+            {run.metrics.total_roles_after_filter > 0 && (
+              <span>{run.metrics.total_roles_after_filter} after filter</span>
+            )}
+            <span>{Math.round(run.metrics.elapsed_seconds)}s elapsed</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JobRunHistory() {
+  const [page, setPage] = useState(1);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["job-runs", page],
+    queryFn: () => getJobRuns(page, JOB_RUNS_PER_PAGE),
+    retry: false,
+  });
+
+  if (!data && !isFetching) return null;
+  if (data && data.total === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm text-white/50 uppercase tracking-wide">
+          Run History
+        </h3>
+        {isFetching && (
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white/70" />
+        )}
+      </div>
+
+      {data && data.runs.length > 0 && (
+        <>
+          <div className="space-y-2">
+            {data.runs.map((run) => (
+              <JobRunCard key={run.id} run={run} />
+            ))}
+          </div>
+
+          {data.total_pages > 1 && (
+            <div className="flex items-center justify-center gap-4 pt-1">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(255,255,255,0.10)",
+                  border: "1px solid rgba(255,255,255,0.20)",
+                  color: "rgba(255,255,255,0.75)",
+                }}
+              >
+                ← Previous
+              </button>
+              <span className="text-sm text-white/60 tabular-nums">
+                Page {page} of {data.total_pages}
+              </span>
+              <button
+                disabled={page >= data.total_pages}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(255,255,255,0.10)",
+                  border: "1px solid rgba(255,255,255,0.20)",
+                  color: "rgba(255,255,255,0.75)",
+                }}
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Main tab ─────────────────────────────────────────────────────────────────
 
 export function RolesTab() {
@@ -814,6 +975,7 @@ export function RolesTab() {
       qc.setQueryData(["roles"], data);
       qc.setQueryData(["roles-checkpoint"], null);
       qc.invalidateQueries({ queryKey: ["roles-unfiltered"] });
+      qc.invalidateQueries({ queryKey: ["job-runs"] });
       setError(null);
     },
     onError: (err: { response?: { data?: { detail?: string } }; message: string }) => {
@@ -1135,6 +1297,11 @@ export function RolesTab() {
           )}
         </div>
       )}
+
+      {/* Job Run History */}
+      <div className="border-t border-white/10 pt-4">
+        <JobRunHistory />
+      </div>
     </div>
   );
 }

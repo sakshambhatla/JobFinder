@@ -104,6 +104,48 @@ export interface RolesResponse {
   flagged_companies: FlaggedCompany[];
   roles: DiscoveredRole[];
   in_progress?: boolean;
+  job_run_id?: string;
+  job_run_name?: string;
+}
+
+export interface JobRunMetrics {
+  companies_total: number;
+  companies_succeeded: number;
+  companies_failed: number;
+  ats_visits: Record<string, number>;
+  jobs_per_ats: Record<string, number>;
+  jobs_per_company: Record<string, number>;
+  career_page_per_company: Record<string, number>;
+  playwright_uses: number;
+  browser_agent_uses: number;
+  total_roles_fetched: number;
+  total_roles_after_filter: number;
+  total_roles_after_score: number;
+  filter_batches: number;
+  score_batches: number;
+  errors: string[];
+  elapsed_seconds: number;
+}
+
+export interface JobRun {
+  id: string;
+  run_name: string;
+  company_run_id: string | null;
+  parent_job_run_id: string | null;
+  run_type: string;
+  status: string;
+  companies_input: string[];
+  metrics: JobRunMetrics;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface JobRunsPage {
+  runs: JobRun[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 // ─── Resume ───────────────────────────────────────────────────────────────────
@@ -238,6 +280,23 @@ export async function getRolesCheckpoint(): Promise<RolesCheckpoint | null> {
   } catch {
     return null;
   }
+}
+
+// ─── Job Runs ─────────────────────────────────────────────────────────────────
+
+export async function getJobRuns(
+  page = 1,
+  pageSize = 10
+): Promise<JobRunsPage> {
+  const { data } = await api.get<JobRunsPage>("/job-runs", {
+    params: { page, page_size: pageSize },
+  });
+  return data;
+}
+
+export async function getJobRun(runId: string): Promise<JobRun> {
+  const { data } = await api.get<JobRun>(`/job-runs/${encodeURIComponent(runId)}`);
+  return data;
 }
 
 export interface BrowserFetchResult {
