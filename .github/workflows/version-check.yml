@@ -1,0 +1,54 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-major-version:
+    name: Require major version bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+
+      - name: Compare major versions
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+
+          def get_major(path):
+              text = open(path).read()
+              m = re.search(r'^version\s*=\s*"(\d+)\.\d+\.\d+"', text, re.MULTILINE)
+              if not m:
+                  print(f"ERROR: Could not parse version from {path}", file=sys.stderr)
+                  sys.exit(1)
+              return int(m.group(1))
+
+          pr_major   = get_major("pr/pyproject.toml")
+          main_major = get_major("main/pyproject.toml")
+
+          print(f"main major version : {main_major}")
+          print(f"PR   major version : {pr_major}")
+
+          if pr_major <= main_major:
+              print(
+                  f"\n❌ Major version must be bumped before merging to main.\n"
+                  f"   Current main: {main_major}.x.x  →  PR must be at least {main_major + 1}.0.0\n"
+                  f"   Run:  python scripts/bump_version.py --major",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print(f"\n✅ Major version bumped ({main_major} → {pr_major}). Good to merge.")
+          EOF

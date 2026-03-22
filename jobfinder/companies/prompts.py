@@ -14,10 +14,10 @@ For each company, provide:
 real, currently accessible URL of the company's careers or jobs listing page. \
 Do not guess or fabricate URLs — use the most canonical, well-known URL for the \
 company's jobs listing.
-- ats_type: One of "greenhouse", "lever", "ashby", "workday", "linkedin", or "unknown"
+- ats_type: One of "greenhouse", "lever", "ashby", "ycombinator", "workday", "linkedin", or "unknown"
 - ats_board_token: The board token/slug used in the ATS API URL (e.g. for \
 Greenhouse it's the slug in boards.greenhouse.io/SLUG, for Lever it's the slug \
-in jobs.lever.co/SLUG). Set to null if unknown.
+in jobs.lever.co/SLUG). Set to null if unknown. For ycombinator, set to null.
 
 Return ONLY a JSON array of objects with these exact fields. No markdown, no \
 explanation, just the JSON array.
@@ -25,7 +25,8 @@ explanation, just the JSON array.
 Always include the seed companies themselves in the results. Prioritize companies that:
 1. Operate in the same industry or product space as the seed companies
 2. Use Greenhouse, Lever, or Ashby (since we can programmatically fetch their jobs)
-3. Are well-known, active companies
+3. Are YC-backed startups (use ats_type="ycombinator" for companies known to be in Y Combinator)
+4. Are well-known, active companies
 """
 
 
@@ -33,6 +34,7 @@ def build_seed_user_prompt(
     seed_companies: list[str],
     max_companies: int,
     exclude_names: list[str] | None = None,
+    motivation_summary: str | None = None,
 ) -> str:
     """Build the user message for seed-based company discovery."""
     seeds = ", ".join(seed_companies)
@@ -42,6 +44,12 @@ def build_seed_user_prompt(
         f"industry or product space as the seed companies. "
         f"Always include the seed companies themselves in your response."
     )
+    if motivation_summary:
+        prompt += (
+            f"\n\nThe candidate has specified the following preferences for their "
+            f"job search. Prioritize companies that match these preferences:\n"
+            f"{motivation_summary}"
+        )
     if exclude_names:
         prompt += (
             f"\n\nDo NOT suggest these companies (already found): "
@@ -63,10 +71,10 @@ real, currently accessible URL of the company's careers or jobs listing page. \
 Do not guess or fabricate URLs — use the most canonical, well-known URL for the \
 company's jobs listing (e.g. https://www.lifeatspotify.com/jobs, not a generic \
 company homepage path like /careers).
-- ats_type: One of "greenhouse", "lever", "ashby", "workday", "linkedin", or "unknown"
+- ats_type: One of "greenhouse", "lever", "ashby", "ycombinator", "workday", "linkedin", or "unknown"
 - ats_board_token: The board token/slug used in the ATS API URL (e.g. for \
 Greenhouse it's the slug in boards.greenhouse.io/SLUG, for Lever it's the slug \
-in jobs.lever.co/SLUG). Set to null if unknown.
+in jobs.lever.co/SLUG). Set to null if unknown. For ycombinator, set to null.
 
 Return ONLY a JSON array of objects with these exact fields. No markdown, no \
 explanation, just the JSON array.
@@ -74,7 +82,8 @@ explanation, just the JSON array.
 Prioritize companies that:
 1. Are actively hiring in roles matching the candidate's experience
 2. Use Greenhouse, Lever, or Ashby (since we can programmatically fetch their jobs)
-3. Operate in industries relevant to the candidate's background
+3. Are YC-backed startups if the candidate has startup experience (use ats_type="ycombinator")
+4. Operate in industries relevant to the candidate's background
 """
 
 
@@ -82,6 +91,7 @@ def build_user_prompt(
     resumes: list[dict],
     max_companies: int,
     exclude_names: list[str] | None = None,
+    motivation_summary: str | None = None,
 ) -> str:
     """Build the user message from parsed resume data."""
     parts: list[str] = []
@@ -104,6 +114,13 @@ def build_user_prompt(
         parts.append(f"Recent job titles: {', '.join(set(all_titles))}")
     if all_companies:
         parts.append(f"Previous employers: {', '.join(set(all_companies))}")
+
+    if motivation_summary:
+        parts.append(
+            f"\nThe candidate has specified the following preferences for their "
+            f"job search. Prioritize companies that match these preferences:\n"
+            f"{motivation_summary}"
+        )
 
     parts.append(f"\nPlease suggest up to {max_companies} companies that would be a good fit.")
 

@@ -19,15 +19,22 @@ ats/
   greenhouse.py     # boards-api.greenhouse.io/v1/boards/{token}/jobs
   lever.py          # api.lever.co/v0/postings/{company}?mode=json
   ashby.py          # api.ashbyhq.com/posting-api/job-board/{token}
-  unsupported.py    # raises UnsupportedATSError (Workday/LinkedIn/unknown)
+  unsupported.py    # raises UnsupportedATSError (Workday/LinkedIn/YCombinator/unknown)
   browser_session.py# AgentSession (queue + kill_event + task), AgentMetrics, RateLimitStrategy
   career_page.py    # Tier 2 HTML scraping + Tier 3 browser agent; _StreamingLLMWrapper,
                     # _run_browser_agent_streaming, _build_task_prompt, _maybe_save_api_profile
+sources/
+  __init__.py       # SOURCE_REGISTRY: dict[str, BaseJobSource]; get_enabled_sources(config)
+  base.py           # BaseJobSource ABC; JobSourceError
+  ycombinator.py    # Y Combinator Jobs via RapidAPI (free-y-combinator-jobs-api)
+  cache.py          # ExternalSourceCache: per-source TTL (12h for YC)
 ```
 
 ## Discovery Pipeline (`discovery.py`)
 
-Two-pass orchestrator with cache + progress callbacks:
+Three-pass orchestrator with cache + progress callbacks:
+
+**Pass 0 — External job boards** (if enabled): Queries aggregator APIs (e.g. YC Jobs via RapidAPI) that return roles across many companies. Controlled by `config.enable_yc_jobs`. Uses `ExternalSourceCache` (12h TTL for YC). Requires `RAPIDAPI_KEY` env var (server-level credential, not per-user). Gracefully skips if key not set or source fails.
 
 **Pass 1 — ATS APIs**: Iterates companies, looks up fetcher via `ATS_REGISTRY[company.ats_type]`.
 - `UnsupportedATSError` → added to `flagged` list with career page URL
@@ -42,6 +49,13 @@ Two-pass orchestrator with cache + progress callbacks:
 2. Add entry to `ATS_REGISTRY` in `ats/__init__.py`
 3. Update `DiscoveredCompany.ats_type` literal in `storage/schemas.py`
 4. Update the LLM prompt in `companies/prompts.py` so it can emit the new type
+
+**Adding a new external job source (e.g. another RapidAPI):**
+1. Create `sources/<name>.py` subclassing `BaseJobSource`, implement `fetch_all(api_key, timeout) -> list[DiscoveredRole]`
+2. Add entry to `_REGISTRY` in `sources/__init__.py`
+3. Add config flag (e.g. `enable_<name>: bool`) to `config.py:AppConfig`
+4. Wire flag in `get_enabled_sources()` in `sources/__init__.py`
+5. Add CLI flag (`--enable-<name>`) to `cli.py`
 
 ## LLM Filtering (`filters.py`)
 - **Batch size**: 100 roles/call

@@ -28,7 +28,7 @@ routes/
 | POST | `/api/resume/upload` | Saves `.txt` file, calls `parse_resumes()`, writes `resumes.json` |
 | GET | `/api/resume` | Reads `resumes.json`, 404 if absent |
 | DELETE | `/api/resume/{filename}` | Removes resume entry + deletes `.txt` file |
-| POST | `/api/companies/discover` | LLM company discovery; writes `companies.json` + `company_runs.json`; upserts registry |
+| POST | `/api/companies/discover` | LLM company discovery; writes `companies.json` + `company_runs.json`; upserts registry. Accepts `focus` ("regular"\|"startups") — stored on run, auto-enables YC Jobs in role discovery |
 | GET | `/api/companies` | Reads `companies.json`, 404 if absent |
 | GET | `/api/companies/registry` | Returns perpetual per-user company registry |
 | POST | `/api/roles/discover` | ATS fetch + filter + score; writes `roles.json` + `job_runs.json` |

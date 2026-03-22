@@ -21,6 +21,7 @@ bash setup/setup.sh          # macOS / Linux
 # 3. Add your API key to .env
 #    Anthropic: https://console.anthropic.com
 #    Gemini (free): https://aistudio.google.com
+#    RapidAPI (YC Jobs, optional): https://rapidapi.com
 
 # 4. Start
 source .venv/bin/activate
@@ -116,11 +117,12 @@ Place plain text (`.txt`) resume files in `resumes/`. Multiple files are support
 
 ## ATS Support
 
-| ATS | Status |
-|-----|--------|
-| Greenhouse | Fully supported |
-| Lever | Fully supported |
-| Ashby | Fully supported |
+| Source | Status |
+|--------|--------|
+| Greenhouse | Fully supported (public API) |
+| Lever | Fully supported (public API) |
+| Ashby | Fully supported (public API) |
+| Y Combinator Jobs | Fully supported (RapidAPI; `--enable-yc-jobs` / `enable_yc_jobs: true`) |
 | Career Page (LLM) | LLM parses static HTML; merged with ATS results |
 | Workday | Flagged for manual check |
 | LinkedIn | Flagged for manual check |

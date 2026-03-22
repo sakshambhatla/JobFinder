@@ -39,6 +39,7 @@ async def list_company_runs(
             "run_name": r["run_name"],
             "source_type": r["source_type"],
             "source_id": r["source_id"],
+            "focus": r.get("focus"),
             "company_count": len(r.get("companies", [])),
             "created_at": r["created_at"],
         }

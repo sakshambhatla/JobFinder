@@ -145,6 +145,18 @@ class SupabaseStorageBackend:
                 "exists": self._exists_job_runs,
                 "delete": self._delete_job_runs,
             },
+            "external_job_cache.json": {
+                "read": self._read_ext_cache,
+                "write": self._write_ext_cache,
+                "exists": self._exists_ext_cache,
+                "delete": self._delete_ext_cache,
+            },
+            "user_motivation.json": {
+                "read": self._read_motivation,
+                "write": self._write_motivation,
+                "exists": self._exists_motivation,
+                "delete": self._delete_motivation,
+            },
         }
         return handlers.get(collection)
 
@@ -568,6 +580,7 @@ class SupabaseStorageBackend:
                 "source_type": run.get("source_type", "resume"),
                 "source_id": run.get("source_id", ""),
                 "seed_companies": run.get("seed_companies"),
+                "focus": run.get("focus"),
                 "companies": run.get("companies", []),
                 "created_at": run.get("created_at") or datetime.now(timezone.utc).isoformat(),
             }
@@ -593,6 +606,7 @@ class SupabaseStorageBackend:
             "source_type": row.get("source_type", "resume"),
             "source_id": row.get("source_id", ""),
             "seed_companies": row.get("seed_companies"),
+            "focus": row.get("focus"),
             "companies": row.get("companies", []),
             "created_at": row.get("created_at", ""),
         }
@@ -657,3 +671,100 @@ class SupabaseStorageBackend:
             "created_at": row.get("created_at", ""),
             "completed_at": row.get("completed_at"),
         }
+
+    # ── External Job Cache ─────────────────────────────────────────────────
+
+    def _read_ext_cache(self) -> dict | None:
+        resp = (
+            self._client.table("external_job_cache")
+            .select("*")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        if not resp.data:
+            return None
+        entries: dict = {}
+        for row in resp.data:
+            entries[row["source"]] = {
+                "source": row["source"],
+                "cached_at": row["cached_at"],
+                "expires_at": row["expires_at"],
+                "total_jobs": row.get("total_jobs", 0),
+                "roles": row.get("jobs", []),
+            }
+        return {"version": 1, "entries": entries}
+
+    def _write_ext_cache(self, data: dict) -> None:
+        entries = data.get("entries", {})
+        for _key, entry in entries.items():
+            row = {
+                "user_id": self._user_id,
+                "source": entry["source"],
+                "cached_at": entry["cached_at"],
+                "expires_at": entry["expires_at"],
+                "total_jobs": entry.get("total_jobs", 0),
+                "jobs": entry.get("roles", []),
+            }
+            (
+                self._client.table("external_job_cache")
+                .upsert(row, on_conflict="user_id,source")
+                .execute()
+            )
+
+    def _exists_ext_cache(self) -> bool:
+        resp = (
+            self._client.table("external_job_cache")
+            .select("id", count="exact")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        return (resp.count or 0) > 0
+
+    def _delete_ext_cache(self) -> None:
+        self._client.table("external_job_cache").delete().eq("user_id", self._user_id).execute()
+
+    # ── User Motivation ───────────────────────────────────────────────────────
+
+    def _read_motivation(self) -> dict | None:
+        resp = (
+            self._client.table("user_motivations")
+            .select("*")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        if not resp.data:
+            return None
+        row = resp.data[0]
+        return {
+            "resume_id": row.get("resume_id"),
+            "chat_history": row.get("chat_history", []),
+            "summary": row.get("summary", ""),
+            "status": row.get("status", "in_progress"),
+            "created_at": row.get("created_at", ""),
+            "updated_at": row.get("updated_at", ""),
+        }
+
+    def _write_motivation(self, data: dict) -> None:
+        row = {
+            "user_id": self._user_id,
+            "resume_id": data.get("resume_id"),
+            "chat_history": data.get("chat_history", []),
+            "summary": data.get("summary", ""),
+            "status": data.get("status", "in_progress"),
+            "updated_at": data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+        }
+        self._client.table("user_motivations").upsert(
+            row, on_conflict="user_id"
+        ).execute()
+
+    def _exists_motivation(self) -> bool:
+        resp = (
+            self._client.table("user_motivations")
+            .select("id", count="exact")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        return (resp.count or 0) > 0
+
+    def _delete_motivation(self) -> None:
+        self._client.table("user_motivations").delete().eq("user_id", self._user_id).execute()

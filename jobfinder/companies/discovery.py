@@ -26,6 +26,7 @@ def discover_companies(
     *,
     seed_companies: list[str] | None = None,
     api_key: str | None = None,
+    motivation_summary: str | None = None,
 ) -> list[DiscoveredCompany]:
     """Discover companies in batches to avoid LLM response truncation.
 
@@ -61,6 +62,7 @@ def discover_companies(
                 batch_size=batch_size,
                 exclude_names=exclude,
                 api_key=api_key,
+                motivation_summary=motivation_summary,
             )
         else:
             raw_text = _call_anthropic(
@@ -69,6 +71,7 @@ def discover_companies(
                 batch_size=batch_size,
                 exclude_names=exclude,
                 api_key=api_key,
+                motivation_summary=motivation_summary,
             )
 
         batch = _parse_response(raw_text)
@@ -100,6 +103,7 @@ def _call_anthropic(
     batch_size: int = _BATCH_SIZE,
     exclude_names: list[str] | None = None,
     api_key: str | None = None,
+    motivation_summary: str | None = None,
 ) -> str:
     from jobfinder.utils.throttle import get_limiter
     get_limiter(config.rpm_limit).wait()
@@ -109,10 +113,16 @@ def _call_anthropic(
     client = anthropic.Anthropic(**({"api_key": api_key} if api_key else {}))
     if seed_companies:
         system = SEED_SYSTEM_PROMPT
-        user_prompt = build_seed_user_prompt(seed_companies, batch_size, exclude_names=exclude_names)
+        user_prompt = build_seed_user_prompt(
+            seed_companies, batch_size,
+            exclude_names=exclude_names, motivation_summary=motivation_summary,
+        )
     else:
         system = SYSTEM_PROMPT
-        user_prompt = build_user_prompt(resumes, batch_size, exclude_names=exclude_names)
+        user_prompt = build_user_prompt(
+            resumes, batch_size,
+            exclude_names=exclude_names, motivation_summary=motivation_summary,
+        )
 
     print()  # blank line before stream
     chunks: list[str] = []
@@ -137,6 +147,7 @@ def _call_gemini(
     batch_size: int = _BATCH_SIZE,
     exclude_names: list[str] | None = None,
     api_key: str | None = None,
+    motivation_summary: str | None = None,
     _attempt: int = 0,
 ) -> str:
     import time
@@ -153,10 +164,16 @@ def _call_gemini(
     client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY"))
     if seed_companies:
         system = SEED_SYSTEM_PROMPT
-        user_prompt = build_seed_user_prompt(seed_companies, batch_size, exclude_names=exclude_names)
+        user_prompt = build_seed_user_prompt(
+            seed_companies, batch_size,
+            exclude_names=exclude_names, motivation_summary=motivation_summary,
+        )
     else:
         system = SYSTEM_PROMPT
-        user_prompt = build_user_prompt(resumes, batch_size, exclude_names=exclude_names)
+        user_prompt = build_user_prompt(
+            resumes, batch_size,
+            exclude_names=exclude_names, motivation_summary=motivation_summary,
+        )
 
     print()  # blank line before stream
     chunks: list[str] = []
@@ -192,6 +209,7 @@ def _call_gemini(
                     batch_size=batch_size,
                     exclude_names=exclude_names,
                     api_key=api_key,
+                    motivation_summary=motivation_summary,
                     _attempt=_attempt + 1,
                 )
 

@@ -43,6 +43,9 @@ vi.mock("@/lib/api", () => ({
   getApiKeyStatus: vi.fn().mockResolvedValue({ anthropic: false, gemini: false }),
   storeApiKey: vi.fn(),
   deleteApiKey: vi.fn(),
+  getMotivation: vi.fn().mockResolvedValue(null),
+  sendMotivationChat: vi.fn(),
+  deleteMotivation: vi.fn(),
 }));
 
 // ── Seed local mode so ModeSelectionPage is bypassed in all tests ─────────────

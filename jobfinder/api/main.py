@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from jobfinder.api.routes import companies, company_runs, job_runs, logs, resume, roles, settings
+from jobfinder.api.routes import companies, company_runs, job_runs, logs, motivation, resume, roles, settings
 from jobfinder.config import load_config
 from jobfinder.utils.log_stream import init_log_stream
 
@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="JobFinder", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="JobFinder", version="3.0.0", lifespan=lifespan)
 
 _cors_origins = os.environ.get(
     "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
@@ -42,6 +42,7 @@ app.include_router(company_runs.router, prefix="/api")
 app.include_router(job_runs.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
+app.include_router(motivation.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 
 # Serve the built React app in production (ui/dist must exist)

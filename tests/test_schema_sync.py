@@ -173,6 +173,7 @@ class TestSchemaSync:
             "usage_events",
             "company_runs",
             "job_runs",
+            "external_job_cache",
         }
         missing = expected - set(sql_schema.keys())
         assert not missing, f"SQL parser missed tables: {missing}"
@@ -190,6 +191,7 @@ class TestSchemaSync:
             "checkpoints",
             "company_runs",
             "job_runs",
+            "external_job_cache",
         }
         missing = expected - set(python_refs.keys())
         assert not missing, f"Python parser missed tables: {missing}"

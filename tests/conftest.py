@@ -112,3 +112,8 @@ def lever_fixture() -> list:
 @pytest.fixture()
 def ashby_fixture() -> dict:
     return json.loads((FIXTURES_DIR / "ashby_jobs.json").read_text())
+
+
+@pytest.fixture()
+def ycombinator_fixture() -> list:
+    return json.loads((FIXTURES_DIR / "ycombinator_jobs.json").read_text())

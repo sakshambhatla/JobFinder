@@ -1,0 +1,179 @@
+[
+  {
+    "id": "2066940969",
+    "date_posted": "2026-03-19T23:08:20",
+    "date_created": "2026-03-20T01:30:21.859082",
+    "title": "Senior Software Engineer",
+    "organization": "Retool",
+    "organization_url": "https://retool.com",
+    "date_validthrough": null,
+    "locations_raw": [
+      {
+        "@type": "Place",
+        "address": {
+          "@type": "PostalAddress",
+          "addressLocality": "San Francisco",
+          "addressRegion": "California",
+          "addressCountry": "US"
+        }
+      }
+    ],
+    "location_type": null,
+    "location_requirements_raw": null,
+    "salary_raw": {
+      "@type": "MonetaryAmount",
+      "currency": "USD",
+      "value": {
+        "@type": "QuantitativeValue",
+        "unitText": "YEAR",
+        "minValue": 180000,
+        "maxValue": 250000
+      }
+    },
+    "employment_type": [
+      "FULL_TIME"
+    ],
+    "url": "https://www.ycombinator.com/companies/retool/jobs/abc123-senior-software-engineer",
+    "source_type": "jobboard",
+    "source": "ycombinator",
+    "source_domain": "ycombinator.com",
+    "organization_logo": "https://bookface-images.s3.amazonaws.com/small_logos/retool.png",
+    "cities_derived": [
+      "San Francisco"
+    ],
+    "counties_derived": null,
+    "regions_derived": [
+      "California"
+    ],
+    "countries_derived": [
+      "United States"
+    ],
+    "locations_derived": [
+      "San Francisco, California, United States"
+    ],
+    "timezones_derived": [
+      "America/Los_Angeles"
+    ],
+    "lats_derived": [
+      37.7749295
+    ],
+    "lngs_derived": [
+      -122.4194155
+    ],
+    "remote_derived": false,
+    "seniority": null,
+    "directapply": null,
+    "external_apply_url": null,
+    "ats_duplicate": null,
+    "linkedin_id": null
+  },
+  {
+    "id": "2066940831",
+    "date_posted": "2026-03-19T21:06:56",
+    "date_created": "2026-03-20T01:30:10.633791",
+    "title": "Product Manager",
+    "organization": "Airbnb",
+    "organization_url": "https://airbnb.com",
+    "date_validthrough": null,
+    "locations_raw": null,
+    "location_type": "TELECOMMUTE",
+    "location_requirements_raw": [
+      {
+        "@type": "Country",
+        "name": null
+      }
+    ],
+    "salary_raw": null,
+    "employment_type": [
+      "FULL_TIME"
+    ],
+    "url": "https://www.ycombinator.com/companies/airbnb/jobs/def456-product-manager",
+    "source_type": "jobboard",
+    "source": "ycombinator",
+    "source_domain": "ycombinator.com",
+    "organization_logo": "https://bookface-images.s3.amazonaws.com/small_logos/airbnb.png",
+    "cities_derived": null,
+    "counties_derived": null,
+    "regions_derived": null,
+    "countries_derived": null,
+    "locations_derived": null,
+    "timezones_derived": null,
+    "lats_derived": null,
+    "lngs_derived": null,
+    "remote_derived": true,
+    "seniority": null,
+    "directapply": null,
+    "external_apply_url": null,
+    "ats_duplicate": null,
+    "linkedin_id": null
+  },
+  {
+    "id": "2066234064",
+    "date_posted": "2026-03-19T14:50:02",
+    "date_created": "2026-03-19T17:30:21.968866",
+    "title": "Backend Engineer",
+    "organization": "Stripe",
+    "organization_url": "https://stripe.com",
+    "date_validthrough": null,
+    "locations_raw": [
+      {
+        "@type": "Place",
+        "address": {
+          "@type": "PostalAddress",
+          "addressLocality": "New York",
+          "addressRegion": "New York",
+          "addressCountry": "US"
+        }
+      }
+    ],
+    "location_type": null,
+    "location_requirements_raw": null,
+    "salary_raw": {
+      "@type": "MonetaryAmount",
+      "currency": "USD",
+      "value": {
+        "@type": "QuantitativeValue",
+        "unitText": "YEAR",
+        "minValue": 160000,
+        "maxValue": 200000
+      }
+    },
+    "employment_type": [
+      "FULL_TIME",
+      "CONTRACTOR"
+    ],
+    "url": "https://www.ycombinator.com/companies/stripe/jobs/ghi789-backend-engineer",
+    "source_type": "jobboard",
+    "source": "ycombinator",
+    "source_domain": "ycombinator.com",
+    "organization_logo": "https://bookface-images.s3.amazonaws.com/small_logos/stripe.png",
+    "cities_derived": [
+      "New York"
+    ],
+    "counties_derived": null,
+    "regions_derived": [
+      "New York"
+    ],
+    "countries_derived": [
+      "United States"
+    ],
+    "locations_derived": [
+      "New York, New York, United States"
+    ],
+    "timezones_derived": [
+      "America/New_York"
+    ],
+    "lats_derived": [
+      40.7127281
+    ],
+    "lngs_derived": [
+      -74.0060152
+    ],
+    "remote_derived": false,
+    "seniority": null,
+    "directapply": null,
+    "external_apply_url": null,
+    "ats_duplicate": null,
+    "linkedin_id": null
+  }
+]

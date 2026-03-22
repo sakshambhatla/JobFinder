@@ -4,6 +4,28 @@ All notable changes to JobFinder are documented here.
 
 ---
 
+## [v3.0.0] — 2026-03-20
+
+External job source integration and startup-focused discovery.
+
+### Major Features
+
+- **Y Combinator Jobs API**: Fetches recent YC startup jobs via RapidAPI as a new "Pass 0" in the role discovery pipeline, before per-company ATS fetching
+- **External job sources abstraction**: Extensible `jobfinder/roles/sources/` package with registry pattern for adding future RapidAPI integrations
+- **Startups focus toggle**: New "Regular / Startups" selector in Company Discovery UI; tagging a run as "Startups" auto-enables YC Jobs during role discovery
+- **External job cache**: Per-source cache with configurable TTL (12h for YC); stored in `external_job_cache.json` / Supabase table
+
+### Other Changes
+
+- Added `--enable-yc-jobs` CLI flag for `discover-roles`
+- Added `RAPIDAPI_KEY` server-level env var for YC Jobs API access
+- Updated startup resume (all-startup experience: Retool, Brex, PlanGrid)
+- Split UAT skill into `uat-companies` and `uat-roles` for targeted testing
+- Pagination safety cap (MAX_ROLES=1000) on external source fetchers
+- Supabase migration for `external_job_cache` table with RLS
+
+---
+
 ## [v2.0.0] — 2026-03-18
 
 JobFinder is no longer single-player. This release introduces a full managed mode powered by Supabase, transforming JobFinder from a local CLI tool into a multi-user web application with authentication, persistent cloud storage, and a significantly overhauled UI.

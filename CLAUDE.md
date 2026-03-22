@@ -12,7 +12,7 @@
 |---------|--------|-----------|
 | `jobfinder resume` | `data/resumes.json` | `--resume-dir` |
 | `jobfinder discover-companies` | `data/companies.json` | `--max-companies`, `--refresh`, `--seed` (repeatable) |
-| `jobfinder discover-roles` | `data/roles.json` | `--company`, `--refresh`, `--continue`, `--use-cache`, `--skip-career-page` |
+| `jobfinder discover-roles` | `data/roles.json` | `--company`, `--refresh`, `--continue`, `--use-cache`, `--skip-career-page`, `--enable-yc-jobs` |
 | `jobfinder browser-fetch` | roles via browser agent | `--company` |
 | `jobfinder serve` | HTTP server | `--host`, `--port`, `--reload` |
 
@@ -27,16 +27,8 @@ jobfinder/
   companies/
     discovery.py  # discover_companies(resumes, config, seed_companies, api_key) — LLM → DiscoveredCompany[]
     prompts.py    # System + user prompts for company discovery (resume-based + seed-based)
-  roles/          # → see jobfinder/roles/CLAUDE.md
-  storage/
-    schemas.py         # ALL Pydantic models — edit here first when changing data shapes
-    backend.py         # StorageBackend protocol (read/write/exists/delete)
-    store.py           # JsonStorageBackend: atomic JSON read/write (aliased as StorageManager)
-    supabase_backend.py# SupabaseStorageBackend: maps collection filenames to Postgres tables + RLS
-    registry.py        # Company registry: load_or_bootstrap_registry(), upsert_registry(), update_registry_searchable()
-    api_profiles.py    # load/save discovered career-page API endpoints (data/api_profiles.json)
-    vault.py           # Supabase Vault: store/get/delete per-user LLM API keys (SECURITY DEFINER); gracefully handles missing vault functions
-    __init__.py        # get_storage_backend(user_id, jwt_token) → JSON or Supabase backend
+  roles/          # → see jobfinder/roles/CLAUDE.md (includes roles/sources/ for external job boards)
+  storage/        # → see jobfinder/storage/CLAUDE.md
   utils/
     http.py         # head_ok(url), get_json(url, timeout) with retry
     display.py      # Rich console helpers
@@ -45,10 +37,14 @@ jobfinder/
     gemini_errors.py# Parse Gemini 429 responses (daily vs per-minute limits)
 scripts/
   apply_vault_migration.py  # Apply vault SQL migration via psql; falls back to printing SQL + dashboard link
+  bump_version.py           # Bump version (major/minor/patch) across pyproject.toml + source files
 ui/               # → see ui/CLAUDE.md
+tests/            # → see tests/CLAUDE.md
+data/             # → see data/CLAUDE.md
+docs/
+  docs.md         # Human-written learnings & pitfalls — read before major changes
 supabase/
-  migrations/     # Numbered SQL migrations (schema, RLS, vault functions, company/job runs, profile pics)
-                  # NOTE: supabase_vault extension is pre-installed on Supabase — omit CREATE EXTENSION
+  migrations/     # → see supabase/migrations/CLAUDE.md
 ```
 
 ## Config (`config.json`)
@@ -64,6 +60,8 @@ resume_dir            path
 data_dir              path
 debug                 bool                    default false
 skip_career_page      bool                    default false; skip Playwright/browser-agent fallback
+enable_yc_jobs        bool                    default false; fetch YC Jobs via RapidAPI (requires RAPIDAPI_KEY)
+                                              Also auto-enabled when company run has focus="startups"
 
 role_filters.title          string | null     semantic job title filter
 role_filters.posted_after   string | null     natural language date
@@ -83,21 +81,9 @@ browser_agent_rate_limit_initial_wait  int  default 5  initial back-off seconds;
 ```
 
 ## Environment Variables
-API keys from env: `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`.
+API keys from env: `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `RAPIDAPI_KEY` (server-level, for YC Jobs).
 Supabase (managed mode): `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_JWT_SECRET`.
 Server: `CORS_ORIGINS` (comma-separated; defaults to `http://localhost:5173,http://127.0.0.1:5173`).
-
-## Runtime Data Files (`data/`)
-| File | Written by | Contents |
-|------|------------|----------|
-| `resumes.json` | CLI/API | ParsedResume[] |
-| `companies.json` | discover-companies | {discovered_at, source_resume_hash, companies[]} |
-| `company_registry.json` | discover-companies (upsert) + discover-roles (searchable flag) | Perpetual per-user company metadata |
-| `roles.json` | discover-roles | {fetched_at, total_roles, roles_after_filter, roles[]} |
-| `roles_unfiltered.json` | discover-roles (auto) | Pre-filtered roles snapshot |
-| `roles_checkpoint.json` | discover-roles (auto) | Resumable state after rate-limit error |
-| `roles_cache.json` | discover-roles (auto) | RolesCacheEntry[] (2-day TTL per company+ATS) |
-| `api_profiles.json` | Browser agent (auto) | Discovered career-page API endpoints by domain |
 
 ## Cross-Cutting Patterns
 - **Schemas first**: change `storage/schemas.py` before touching discovery/API/UI code
@@ -109,6 +95,10 @@ Server: `CORS_ORIGINS` (comma-separated; defaults to `http://localhost:5173,http
 - **Company registry**: perpetual per-user registry with `searchable` flag; upserted on company discovery, updated after role fetch
 - **Checkpoint/resume**: rate-limit errors during filter/score save a checkpoint; `--continue` resumes from it
 - **SSE streaming**: browser agent streams partial results via `EventSourceResponse`; events: `jobs_batch`, `filter_result`, `score_result`, `done`, `killed`, `error`
+- **External job sources**: `roles/sources/` package for aggregator APIs (YC Jobs via RapidAPI). Runs as Pass 0 before ATS fetch when enabled. Extensible registry pattern for future RapidAPI integrations
+
+## Learnings & Pitfalls
+Read `docs/docs.md` before starting major changes — it contains hard-won operational knowledge and gotchas written by the project maintainer.
 
 ## Testing Convention
 

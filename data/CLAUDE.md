@@ -16,6 +16,7 @@ Edit schemas in `jobfinder/storage/schemas.py` before changing data shapes here.
 | `roles_cache.json` | `discover-roles` (auto) | `RolesCacheEntry[]` — per-company, per-ATS cache with 2-day TTL |
 | `roles_checkpoint.json` | `discover-roles` (auto) | Resume state saved after a `RateLimitError`; deleted on successful completion |
 | `api_profiles.json` | Browser agent (auto) | Discovered career-page API endpoints, keyed by domain (netloc); injected into the agent's task prompt on the next run to skip re-discovery |
+| `external_job_cache.json` | discover-roles Pass 0 (auto) | ExternalJobCacheEntry per source (12h TTL for YC Jobs) |
 
 ## `company_registry.json` schema
 

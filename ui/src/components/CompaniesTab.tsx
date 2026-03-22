@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { MotivationChat } from "@/components/MotivationChat";
 
 const ATS_COLORS: Record<string, string> = {
   greenhouse: "bg-emerald-500/20 text-emerald-300 border border-emerald-400/30",
@@ -122,6 +123,11 @@ function RunCard({ summary }: { summary: CompanyRunSummary }) {
           <Badge className="text-[10px] bg-white/10 text-white/55 border border-white/20">
             {summary.source_type === "seed" ? "seed" : "resume"}
           </Badge>
+          {summary.focus === "startups" && (
+            <Badge className="text-[10px] bg-orange-500/15 text-orange-300 border border-orange-400/25">
+              startups
+            </Badge>
+          )}
           <span className="text-xs text-white/45 tabular-nums">
             {summary.company_count} {summary.company_count === 1 ? "company" : "companies"}
           </span>
@@ -223,6 +229,7 @@ function RunHistory() {
 // ─── Main tab ─────────────────────────────────────────────────────────────────
 
 type DiscoveryMode = "resume" | "seed";
+type CompanyFocus = "regular" | "startups";
 
 function parseSeedCompanies(raw: string): string[] {
   return raw
@@ -238,6 +245,7 @@ export function CompaniesTab() {
   const [mode, setMode] = useState<DiscoveryMode>("resume");
   const [seedInput, setSeedInput] = useState<string>("");
   const [selectedResumeId, setSelectedResumeId] = useState<string>("");
+  const [focus, setFocus] = useState<CompanyFocus>("regular");
   const [error, setError] = useState<string | null>(null);
 
   // Load resumes for the selector
@@ -266,6 +274,7 @@ export function CompaniesTab() {
         model_provider: provider || undefined,
         seed_companies: seeds && seeds.length > 0 ? seeds : undefined,
         resume_id,
+        focus: mode === "resume" ? focus : undefined,
       });
     },
     onSuccess: (data) => {
@@ -346,6 +355,40 @@ export function CompaniesTab() {
               Upload a resume first in the Upload Resume tab.
             </p>
           )}
+
+          {/* Company focus toggle (resume mode only) */}
+          {!isSeedMode && (
+            <div className="space-y-1.5">
+              <Label className="text-white/75">Company Type</Label>
+              <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "rgba(255,255,255,0.20)", width: "fit-content" }}>
+                {(["regular", "startups"] as CompanyFocus[]).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFocus(f)}
+                    className="px-4 py-1.5 text-sm font-medium transition-colors"
+                    style={{
+                      background: focus === f ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)",
+                      color: focus === f ? "white" : "rgba(255,255,255,0.50)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {f === "regular" ? "Regular" : "Startups"}
+                  </button>
+                ))}
+              </div>
+              {focus === "startups" && (
+                <p className="text-xs text-white/40">
+                  Includes YC Jobs API results during role discovery
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Motivation chat (optional — describe what you're looking for) */}
+          <MotivationChat
+            resumeId={!isSeedMode ? (selectedResumeId || resumes[0]?.id) : undefined}
+            provider={provider}
+          />
 
           {/* Seed input (only in seed mode) */}
           {isSeedMode && (

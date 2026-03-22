@@ -83,6 +83,15 @@ class RunMetricsCollector:
         )
         self.total_roles_fetched += role_count
 
+    def record_external_source(
+        self, source_name: str, role_count: int
+    ) -> None:
+        self.ats_visits[source_name] = self.ats_visits.get(source_name, 0) + 1
+        self.jobs_per_ats[source_name] = (
+            self.jobs_per_ats.get(source_name, 0) + role_count
+        )
+        self.total_roles_fetched += role_count
+
     def record_filter_result(self, kept: int, batches: int) -> None:
         self.total_roles_after_filter = kept
         self.filter_batches = batches

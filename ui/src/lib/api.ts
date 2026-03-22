@@ -67,6 +67,7 @@ export interface CompanyRunSummary {
   run_name: string;
   source_type: "resume" | "seed";
   source_id: string;
+  focus?: string | null;
   company_count: number;
   created_at: string;
 }
@@ -76,6 +77,7 @@ export interface CompanyRun {
   run_name: string;
   source_type: "resume" | "seed";
   source_id: string;
+  focus?: string | null;
   seed_companies: string[] | null;
   companies: DiscoveredCompany[];
   created_at: string;
@@ -188,6 +190,7 @@ export interface DiscoverCompaniesParams {
   model_provider?: string;
   seed_companies?: string[];
   resume_id?: string;
+  focus?: string;
 }
 
 export interface DiscoverCompaniesResponse {
@@ -260,6 +263,7 @@ export interface DiscoverRolesParams {
   relevance_score_criteria?: string;
   model_provider?: string;
   skip_career_page?: boolean;
+  enable_yc_jobs?: boolean;
 }
 
 export interface RolesCheckpoint {
@@ -447,6 +451,57 @@ export async function validateStoredApiKey(
 ): Promise<void> {
   await api.post(`/settings/api-keys/${provider}/validate`);
 }
+
+// ─── Motivation Chat ──────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface UserMotivation {
+  resume_id: string | null;
+  chat_history: ChatMessage[];
+  summary: string;
+  status: "in_progress" | "completed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MotivationChatResponse {
+  reply: string;
+  ready: boolean;
+  summary?: string;
+  status: string;
+  chat_history: ChatMessage[];
+}
+
+export async function sendMotivationChat(
+  message: string,
+  resumeId?: string,
+  modelProvider?: string,
+): Promise<MotivationChatResponse> {
+  const body: Record<string, unknown> = { message };
+  if (resumeId) body.resume_id = resumeId;
+  if (modelProvider) body.model_provider = modelProvider;
+  const { data } = await api.post<MotivationChatResponse>("/motivation/chat", body);
+  return data;
+}
+
+export async function getMotivation(): Promise<UserMotivation | null> {
+  try {
+    const { data } = await api.get<UserMotivation>("/motivation");
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteMotivation(): Promise<void> {
+  await api.delete("/motivation");
+}
+
+// ─── Browser Agent ───────────────────────────────────────────────────────────
 
 /** Send a kill signal to a running browser agent. */
 export async function killBrowserAgent(

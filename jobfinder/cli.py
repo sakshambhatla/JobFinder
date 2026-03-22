@@ -218,6 +218,12 @@ def discover_companies(
     default=False,
     help="Skip Playwright career-page fallback (Pass 2). Return ATS API results only.",
 )
+@click.option(
+    "--enable-yc-jobs",
+    is_flag=True,
+    default=None,
+    help="Include Y Combinator Jobs from RapidAPI (requires RAPIDAPI_KEY env var)",
+)
 @click.pass_context
 def discover_roles_cmd(
     ctx: click.Context,
@@ -226,6 +232,7 @@ def discover_roles_cmd(
     resume: bool,
     use_cache: bool,
     skip_career_page: bool,
+    enable_yc_jobs: bool | None,
 ) -> None:
     """Read open roles from discovered companies' career pages via public ATS APIs."""
     from jobfinder.roles.checkpoint import CHECKPOINT_FILENAME, Checkpoint
@@ -233,7 +240,11 @@ def discover_roles_cmd(
     from jobfinder.roles.errors import RateLimitError
     from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole
 
-    config = load_config(ctx.obj["config_path"], skip_career_page=skip_career_page or None)
+    config = load_config(
+        ctx.obj["config_path"],
+        skip_career_page=skip_career_page or None,
+        enable_yc_jobs=enable_yc_jobs,
+    )
     store = StorageManager(config.data_dir)
     cp = Checkpoint(store)
 

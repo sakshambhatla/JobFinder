@@ -70,10 +70,21 @@ async def discover_companies_endpoint(
             resumes = all_resumes[:1]
             source_id = resumes[0].get("id") or str(uuid.uuid4())
 
+    # Load motivation summary if a completed one exists
+    motivation_summary: str | None = None
+    try:
+        motivation = store.read("user_motivation.json")
+        if motivation and motivation.get("status") == "completed" and motivation.get("summary"):
+            motivation_summary = motivation["summary"]
+    except Exception:
+        pass  # Table may not exist yet; gracefully skip
+
     # Run blocking LLM call in a thread pool
     try:
         companies = await asyncio.to_thread(
-            discover_companies, resumes, config, seed_companies=seed_companies, api_key=api_key
+            discover_companies, resumes, config,
+            seed_companies=seed_companies, api_key=api_key,
+            motivation_summary=motivation_summary,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Company discovery failed: {exc}") from exc
@@ -111,6 +122,7 @@ async def discover_companies_endpoint(
         "source_type": "seed" if seed_companies else "resume",
         "source_id": source_id,
         "seed_companies": list(seed_companies) if seed_companies else None,
+        "focus": req.focus,
         "companies": [c.model_dump() for c in companies],
         "created_at": discovered_at,
     }

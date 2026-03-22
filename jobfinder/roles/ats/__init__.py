@@ -12,6 +12,7 @@ _REGISTRY: dict[str, BaseFetcher] = {
     "ashby": AshbyFetcher(),
     "workday": UnsupportedFetcher("workday"),
     "linkedin": UnsupportedFetcher("linkedin"),
+    "ycombinator": UnsupportedFetcher("ycombinator"),
     "unknown": UnsupportedFetcher("unknown"),
 }
 

@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from jobfinder.config import AppConfig
+from jobfinder.config import AppConfig, get_rapidapi_key
 from jobfinder.roles.ats import get_fetcher
 from jobfinder.roles.ats.base import ATSFetchError, UnsupportedATSError
 from jobfinder.roles.ats.career_page import fetch_career_page_roles
 from jobfinder.roles.cache import RolesCache
 from jobfinder.roles.metrics import RunMetricsCollector
+from jobfinder.roles.sources import get_enabled_sources
+from jobfinder.roles.sources.cache import ExternalSourceCache
 from jobfinder.storage.backend import StorageBackend
 from jobfinder.storage.registry import update_registry_searchable
 from jobfinder.storage.schemas import DiscoveredCompany, DiscoveredRole, FlaggedCompany
@@ -43,6 +45,63 @@ def discover_roles(
     flagged: list[FlaggedCompany] = []
 
     cache = RolesCache(store)
+
+    # ── Pass 0: External job board sources ─────────────────────────────────
+    enabled_sources = get_enabled_sources(config)
+    if enabled_sources:
+        ext_cache = ExternalSourceCache(store)
+        n_sources = len(enabled_sources)
+        log(
+            f"\n[bold]Pass 0 — External job boards[/bold] "
+            f"({n_sources} {'source' if n_sources == 1 else 'sources'}): "
+            f"fetching aggregated job feeds..."
+        )
+        for source_name, source in enabled_sources:
+            # Cache check
+            if use_cache:
+                cached = ext_cache.get(source_name)
+                if cached is not None:
+                    all_roles.extend(cached)
+                    age = ext_cache.age_hours(source_name) or 0
+                    log(
+                        f"  [dim]{source.name}[/dim]: "
+                        f"{len(cached)} roles (cached {age:.0f}h ago)"
+                    )
+                    if on_progress:
+                        on_progress(all_roles, flagged)
+                    continue
+
+            rapidapi_key = get_rapidapi_key()
+            if not rapidapi_key:
+                log(
+                    f"  [yellow]{source.name}: RAPIDAPI_KEY not set — skipped[/yellow]",
+                    level="warning",
+                )
+                continue
+
+            with console.status(f"Fetching from {source.name}..."):
+                try:
+                    roles = source.fetch_all(
+                        api_key=rapidapi_key,
+                        timeout=config.request_timeout,
+                    )
+                    all_roles.extend(roles)
+                    ext_cache.put(source_name, roles, source.cache_ttl_hours)
+                    if metrics:
+                        metrics.record_external_source(source_name, len(roles))
+                    log(
+                        f"  [green]✓ {source.name}[/green]: {len(roles)} roles",
+                        level="success",
+                    )
+                    if on_progress:
+                        on_progress(all_roles, flagged)
+                except Exception as exc:
+                    log(
+                        f"  [yellow]⚠ {source.name}: {exc}[/yellow]",
+                        level="warning",
+                    )
+                    if metrics:
+                        metrics.errors.append(f"{source.name}: {exc}")
 
     # ── Pass 1: ATS API fetch ────────────────────────────────────────────────
     n_companies = len(companies)

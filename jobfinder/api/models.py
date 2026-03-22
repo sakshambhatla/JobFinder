@@ -8,6 +8,7 @@ class DiscoverCompaniesRequest(BaseModel):
     model_provider: str | None = None  # overrides config
     seed_companies: list[str] | None = None  # if set, use seed-based discovery instead of resume
     resume_id: str | None = None  # UUID of the selected resume (required in resume mode)
+    focus: str | None = None  # "regular" | "startups"; startups enables YC Jobs in role discovery
 
 
 class RoleFiltersRequest(BaseModel):
@@ -28,6 +29,13 @@ class DiscoverRolesRequest(BaseModel):
     relevance_score_criteria: str | None = None  # overrides config
     model_provider: str | None = None  # overrides config
     skip_career_page: bool | None = None  # True → skip Playwright Pass 2; None → use config default
+    enable_yc_jobs: bool | None = None  # True → enable YC Jobs Pass 0; auto-set from company run focus
+
+
+class MotivationChatRequest(BaseModel):
+    message: str  # user's latest chat message
+    resume_id: str | None = None  # optional resume for context
+    model_provider: str | None = None  # override LLM provider
 
 
 class FetchBrowserRolesRequest(BaseModel):

@@ -9,7 +9,7 @@ export function Footer({
   onAboutChange,
 }: FooterProps) {
   const currentYear = new Date().getFullYear();
-  const appVersion = "1.0.0"; // Could pull from package.json
+  const appVersion = "3.0.0"; // Could pull from package.json
 
   return (
     <footer

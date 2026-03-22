@@ -168,7 +168,6 @@ async def discover_roles_endpoint(
     if req.skip_career_page is not None:
         overrides["skip_career_page"] = req.skip_career_page
 
-    config = load_config(**overrides)
     store = get_storage_backend(user_id, jwt_token)
     cp = _make_checkpoint(store)
 
@@ -188,6 +187,7 @@ async def discover_roles_endpoint(
 
     # Resolve company_run_id → company_names (if provided)
     effective_company_names = req.company_names
+    enable_yc_from_run = False
     if req.company_run_id and not effective_company_names:
         all_runs: list[dict] = store.read("company_runs.json") or []
         matched_run = next((r for r in all_runs if r.get("id") == req.company_run_id), None)
@@ -197,6 +197,14 @@ async def discover_roles_endpoint(
                 detail=f"Company run '{req.company_run_id}' not found.",
             )
         effective_company_names = [c["name"] for c in matched_run.get("companies", [])]
+        if matched_run.get("focus") == "startups":
+            enable_yc_from_run = True
+
+    # Auto-enable YC Jobs if the company run was tagged "startups" or explicitly requested
+    if req.enable_yc_jobs or enable_yc_from_run:
+        overrides["enable_yc_jobs"] = True
+
+    config = load_config(**overrides)
 
     # Require companies.json only when not using explicit selection and not resuming
     if companies_data is None and not effective_company_names and not (req.resume and cp.exists()):

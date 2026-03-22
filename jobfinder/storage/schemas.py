@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-KNOWN_ATS_TYPES = {"greenhouse", "lever", "ashby", "workday", "linkedin", "unknown"}
+KNOWN_ATS_TYPES = {"greenhouse", "lever", "ashby", "workday", "linkedin", "ycombinator", "unknown"}
 
 
 class ParsedResume(BaseModel):
@@ -129,3 +129,12 @@ class JobRun(BaseModel):
     metrics: JobRunMetrics = Field(default_factory=JobRunMetrics)
     created_at: str = ""
     completed_at: str | None = None
+
+
+class ExternalJobCacheEntry(BaseModel):
+    """Cached results from an external job board source (e.g. YC Jobs API)."""
+    source: str              # e.g. "ycombinator"
+    cached_at: str           # ISO timestamp (UTC)
+    expires_at: str          # ISO timestamp (UTC)
+    total_jobs: int
+    roles: list[DiscoveredRole]

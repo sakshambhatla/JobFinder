@@ -51,6 +51,9 @@ class AppConfig(BaseModel):
     # Loosely coupled: set by UI checkbox today, could be auto-determined in future.
     skip_career_page: bool = False
 
+    # Enable Y Combinator Jobs API (requires a RapidAPI key).
+    enable_yc_jobs: bool = False
+
     # ── Browser agent settings (config.json only, not exposed in the UI) ──────
     # Hard time wall: agent is cancelled after this many minutes regardless of steps.
     browser_agent_max_time_minutes: int = 15
@@ -102,6 +105,14 @@ def require_api_key(provider: str) -> str:
                 "GEMINI_API_KEY environment variable is not set.\n"
                 "Export it with: export GEMINI_API_KEY=your-key-here\n"
                 "Get a free key at: https://aistudio.google.com"
+            )
+    elif provider == "rapidapi":
+        key = os.environ.get("RAPIDAPI_KEY")
+        if not key:
+            raise SystemExit(
+                "RAPIDAPI_KEY environment variable is not set.\n"
+                "Export it with: export RAPIDAPI_KEY=your-key-here\n"
+                "Get a key at: https://rapidapi.com"
             )
     else:
         key = os.environ.get("ANTHROPIC_API_KEY")
@@ -155,3 +166,12 @@ def resolve_api_key(provider: str, user_id: str | None = None) -> str:
         f"No {provider} API key available. "
         f"Set the {env_var} environment variable."
     )
+
+
+def get_rapidapi_key() -> str | None:
+    """Return the server-level RapidAPI key from env, or None if not set.
+
+    Unlike LLM keys, the RapidAPI key is a shared backend credential —
+    not stored per-user in Vault.
+    """
+    return os.environ.get("RAPIDAPI_KEY")
