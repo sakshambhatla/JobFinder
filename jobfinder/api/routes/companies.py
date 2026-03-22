@@ -61,7 +61,7 @@ async def discover_companies_endpoint(
 
         if req.resume_id:
             available_ids = [r.get("id") for r in all_resumes]
-            logger.info(
+            logger.warning(
                 "Looking up resume_id=%s among %d resume(s): %s",
                 req.resume_id, len(all_resumes), available_ids,
             )

@@ -189,7 +189,10 @@ class SupabaseStorageBackend:
                 "job_titles": r.get("job_titles", []),
                 "parsed_at": r.get("parsed_at", datetime.now(timezone.utc).isoformat()),
             }
-            self._client.table("resumes").insert(row).execute()
+            # Preserve the application-generated ID so API responses and DB stay in sync
+            if r.get("id"):
+                row["id"] = r["id"]
+            self._client.table("resumes").upsert(row, on_conflict="user_id").execute()
 
     def _exists_resumes(self) -> bool:
         resp = (

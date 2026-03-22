@@ -54,7 +54,7 @@ async def upload_resume(
         # Replace entry for this filename; append if new
         updated = [r for r in existing_data if r.get("filename") != safe_filename] + [dumped]
         stored_ids = [r.get("id") for r in updated]
-        logger.info("Resume upload (managed path): stored %d resume(s) with ids=%s", len(updated), stored_ids)
+        logger.warning("Resume upload (managed path): stored %d resume(s) with ids=%s", len(updated), stored_ids)
         store.write("resumes.json", updated)
         return {"resumes": updated}
 
@@ -82,7 +82,7 @@ async def upload_resume(
         result.append(dumped)
 
     stored_ids = [r.get("id") for r in result]
-    logger.info("Resume upload (local path): stored %d resume(s) with ids=%s", len(result), stored_ids)
+    logger.warning("Resume upload (local path): stored %d resume(s) with ids=%s", len(result), stored_ids)
     store.write("resumes.json", result)
     return {"resumes": result}
 

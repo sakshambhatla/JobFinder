@@ -267,7 +267,7 @@ export function CompaniesTab() {
       const seeds = mode === "seed" ? parseSeedCompanies(seedInput) : undefined;
       const resume_id =
         mode === "resume"
-          ? selectedResumeId || resumes[0]?.id
+          ? selectedResumeId || undefined
           : undefined;
       return discoverCompanies({
         max_companies: maxCompanies ? parseInt(maxCompanies, 10) : undefined,
