@@ -6,8 +6,8 @@ on:
       - main
 
 jobs:
-  check-major-version:
-    name: Require major version bump
+  check-version-bump:
+    name: Require version bump
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR branch
@@ -22,33 +22,34 @@ jobs:
           ref: main
           path: main
 
-      - name: Compare major versions
+      - name: Compare versions
         run: |
           python3 - <<'EOF'
           import re, sys
+          from functools import reduce
 
-          def get_major(path):
+          def get_version(path):
               text = open(path).read()
-              m = re.search(r'^version\s*=\s*"(\d+)\.\d+\.\d+"', text, re.MULTILINE)
+              m = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', text, re.MULTILINE)
               if not m:
                   print(f"ERROR: Could not parse version from {path}", file=sys.stderr)
                   sys.exit(1)
-              return int(m.group(1))
+              return tuple(int(x) for x in m.groups())
 
-          pr_major   = get_major("pr/pyproject.toml")
-          main_major = get_major("main/pyproject.toml")
+          pr_ver   = get_version("pr/pyproject.toml")
+          main_ver = get_version("main/pyproject.toml")
 
-          print(f"main major version : {main_major}")
-          print(f"PR   major version : {pr_major}")
+          print(f"main version : {'.'.join(str(x) for x in main_ver)}")
+          print(f"PR   version : {'.'.join(str(x) for x in pr_ver)}")
 
-          if pr_major <= main_major:
+          if pr_ver <= main_ver:
               print(
-                  f"\n❌ Major version must be bumped before merging to main.\n"
-                  f"   Current main: {main_major}.x.x  →  PR must be at least {main_major + 1}.0.0\n"
-                  f"   Run:  python scripts/bump_version.py --major",
+                  f"\n❌ Version must be bumped before merging to main.\n"
+                  f"   Current main: {'.'.join(str(x) for x in main_ver)}  →  PR version must be higher.\n"
+                  f"   Run:  python scripts/bump_version.py --patch  (or --minor / --major)",
                   file=sys.stderr,
               )
               sys.exit(1)
 
-          print(f"\n✅ Major version bumped ({main_major} → {pr_major}). Good to merge.")
+          print(f"\n✅ Version bumped ({'.'.join(str(x) for x in main_ver)} → {'.'.join(str(x) for x in pr_ver)}). Good to merge.")
           EOF

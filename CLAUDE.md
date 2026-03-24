@@ -122,3 +122,12 @@ Install test deps: `pip install -e ".[dev]"` · `pnpm --dir ui install`
    - Reviews changed files for secrets, PII, scraping legality, API vulnerabilities, and input validation
    - Appends findings to `security-concerns.md` (gitignored — local only)
    - Run before any commit that touches API routes, scraping logic, or config handling
+
+## Version Bumping
+When entering plan mode for any code change, **always ask the user first**:
+> "Is this a major feature (breaking changes or significant new functionality)
+> or a minor feature/patch (backwards-compatible changes or fixes)?"
+Based on the answer:
+- Major feature → bump major version (X.0.0) or minor (0.X.0) per semver
+- Minor feature → bump patch (0.0.X)
+- Include version bump as a step in the plan
