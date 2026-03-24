@@ -36,8 +36,6 @@ interface Props {
   saving?: boolean;
 }
 
-const BADGE_OPTIONS: (PipelineBadge | "none")[] = ["none", "done", "new", "panel", "await", "sched"];
-
 export default function PipelineEntryDialog({
   open,
   onOpenChange,
