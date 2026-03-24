@@ -50,7 +50,7 @@ export function LoginPage() {
             className="text-4xl font-black tracking-tight text-white mb-1"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            VerdantMe
+            Verdant AI
           </h1>
           <CardTitle className="text-lg font-normal" style={{ color: "rgba(255,255,255,0.6)" }}>
             {isSignUp ? "Create your account" : "Sign in to your account"}

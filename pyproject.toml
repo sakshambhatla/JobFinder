@@ -18,6 +18,8 @@ dependencies = [
     "python-dateutil>=2.8",
     "supabase>=2.0",
     "pyjwt[crypto]>=2.0",
+    "pydantic[email]>=2.0",
+    "resend>=2.0",
 ]
 
 [project.optional-dependencies]

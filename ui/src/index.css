@@ -2,6 +2,17 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/inter/800.css";
+@import "@fontsource/inter/900.css";
+@import "@fontsource/space-grotesk/300.css";
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -200,4 +211,52 @@ header [role="tab"][data-state="active"] {
 header.compact [role="tablist"] {
   width: auto;
   justify-content: flex-start;
+}
+
+/* ─── Landing page design system (The Luminal Ethos) ─── */
+.landing-page {
+  --lp-surface:                 #0e0e0e;
+  --lp-surface-container-low:   #131313;
+  --lp-surface-container:       #1a1a1a;
+  --lp-surface-container-high:  #20201f;
+  --lp-surface-container-highest: #262626;
+  --lp-surface-bright:          #2c2c2c;
+  --lp-surface-container-lowest: #000000;
+  --lp-on-surface:              #ffffff;
+  --lp-on-surface-variant:      #adaaaa;
+  --lp-primary:                 #a3a6ff;
+  --lp-primary-dim:             #6063ee;
+  --lp-secondary:               #53ddfc;
+  --lp-secondary-dim:           #40ceed;
+  --lp-tertiary:                #f5f2ff;
+  --lp-tertiary-dim:            #d7d4f0;
+  --lp-outline-variant:         #484847;
+  --lp-on-primary:              #0f00a4;
+  --lp-error:                   #ff6e84;
+
+  font-family: 'Inter', sans-serif;
+  background: var(--lp-surface-container-lowest);
+  color: var(--lp-on-surface);
+}
+
+.landing-page ::selection {
+  background-color: rgba(147, 150, 255, 0.3);
+}
+
+.font-headline { font-family: 'Inter', sans-serif; }
+.font-label { font-family: 'Space Grotesk', sans-serif; }
+
+.pulse-gradient {
+  background: linear-gradient(135deg, #a3a6ff 0%, #6063ee 100%);
+}
+
+.lp-glass-panel {
+  background: rgba(44, 44, 44, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(72, 72, 71, 0.2);
+}
+
+.text-glow {
+  text-shadow: 0 0 20px rgba(163, 166, 255, 0.3);
 }

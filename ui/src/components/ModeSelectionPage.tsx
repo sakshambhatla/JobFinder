@@ -25,7 +25,7 @@ export function ModeSelectionPage() {
             className="text-6xl font-black tracking-tight text-white leading-none mb-3"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            VerdantMe
+            Verdant AI
           </h1>
           <p className="text-sm" style={{ color: "rgba(255,255,255,0.50)" }}>
             Discover companies and roles matched to your resume

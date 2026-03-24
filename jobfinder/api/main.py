@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from jobfinder.api.routes import companies, company_runs, job_runs, logs, motivation, resume, roles, settings
+from jobfinder.api.routes import companies, company_runs, job_runs, logs, motivation, resume, roles, settings, waitlist
 from jobfinder.config import load_config
 from jobfinder.utils.log_stream import init_log_stream
 
@@ -46,6 +46,7 @@ app.include_router(roles.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
 app.include_router(motivation.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(waitlist.router, prefix="/api")
 
 @app.get("/health")
 async def health():

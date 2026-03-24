@@ -24,7 +24,7 @@ export function Footer({
       <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
         {/* Left: Branding */}
         <div className="flex items-center gap-2 text-sm" style={{ color: "rgba(255,255,255,0.60)" }}>
-          <span className="font-semibold">VerdantMe</span>
+          <span className="font-semibold">Verdant AI</span>
           <span>v{appVersion}</span>
         </div>
 
@@ -39,7 +39,7 @@ export function Footer({
             About
           </Button>
           <a
-            href="https://github.com/sakshambhatla/VerdantMe"
+            href="https://github.com/sakshambhatla/Verdant AI"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center text-xs px-2 py-1 rounded hover:bg-white/10 transition-colors"

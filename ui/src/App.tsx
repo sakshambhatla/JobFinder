@@ -138,7 +138,7 @@ function App() {
                 className="text-5xl font-black tracking-tight text-white leading-none"
                 style={{ fontFamily: "var(--font-display)" }}
               >
-                VerdantMe
+                Verdant AI
               </h1>
               <p className="mt-2 text-sm" style={{ color: "rgba(255,255,255,0.50)" }}>
                 Discover companies and roles matched to your resume
@@ -167,7 +167,7 @@ function App() {
                     transition: "opacity 0.3s ease-in-out, max-width 0.3s ease-in-out, margin-right 0.3s ease-in-out",
                   }}
                 >
-                  VerdantMe
+                  Verdant AI
                 </span>
               </div>
 

@@ -17,7 +17,7 @@ export function AboutModal({ open, onOpenChange }: AboutModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh]">
         <DialogHeader>
-          <DialogTitle className="text-2xl">About VerdantMe</DialogTitle>
+          <DialogTitle className="text-2xl">About Verdant AI</DialogTitle>
           <DialogDescription>
             Discover companies and roles matched to your resume
           </DialogDescription>
@@ -29,12 +29,12 @@ export function AboutModal({ open, onOpenChange }: AboutModalProps) {
             <section>
               <h2 className="text-lg font-semibold mb-2">Welcome</h2>
               <p style={{ color: "rgba(255,255,255,0.80)" }}>
-                <strong>VerdantMe</strong> helps you discover job opportunities by finding companies and roles
+                <strong>Verdant AI</strong> helps you discover job opportunities by finding companies and roles
                 related to your professional background. Upload your resume, and let AI-powered discovery
                 help you explore career paths you might not have considered.
               </p>
               <p className="mt-2" style={{ color: "rgba(255,255,255,0.70)" }}>
-                Powered by advanced language models (Claude or Gemini), VerdantMe uses semantic understanding
+                Powered by advanced language models (Claude or Gemini), Verdant AI uses semantic understanding
                 to find meaningful connections between your skills and available opportunities.
               </p>
             </section>
@@ -137,7 +137,7 @@ export function AboutModal({ open, onOpenChange }: AboutModalProps) {
                 </div>
                 <div>
                   <p className="font-semibold">Do I need an API key?</p>
-                  <p className="text-xs mt-1">Yes, you need either an Anthropic (Claude) or Gemini API key to use VerdantMe. You can get one free at anthropic.com or ai.google.dev.</p>
+                  <p className="text-xs mt-1">Yes, you need either an Anthropic (Claude) or Gemini API key to use Verdant AI. You can get one free at anthropic.com or ai.google.dev.</p>
                 </div>
                 <div>
                   <p className="font-semibold">What format should my resume be?</p>
@@ -145,7 +145,7 @@ export function AboutModal({ open, onOpenChange }: AboutModalProps) {
                 </div>
                 <div>
                   <p className="font-semibold">Can I use this on mobile?</p>
-                  <p className="text-xs mt-1">VerdantMe works on mobile browsers, though the table view may require horizontal scrolling on small screens.</p>
+                  <p className="text-xs mt-1">Verdant AI works on mobile browsers, though the table view may require horizontal scrolling on small screens.</p>
                 </div>
               </div>
             </section>

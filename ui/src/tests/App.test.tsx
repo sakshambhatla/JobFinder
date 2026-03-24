@@ -78,9 +78,9 @@ function renderApp() {
 // ── Header rendering ──────────────────────────────────────────────────────────
 
 describe("App header", () => {
-  it("renders the VerdantMe heading", () => {
+  it("renders the Verdant AI heading", () => {
     renderApp();
-    expect(screen.getByRole("heading", { name: /VerdantMe/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Verdant AI/i })).toBeInTheDocument();
   });
 
   it("renders the tagline", () => {
@@ -121,8 +121,8 @@ describe("App header", () => {
 
   it("compact logo is present in the tab band (hidden until scrolled)", () => {
     renderApp();
-    // Both the h1 and the compact span render "VerdantMe" — at least two occurrences
-    expect(screen.getAllByText("VerdantMe").length).toBeGreaterThanOrEqual(2);
+    // Both the h1 and the compact span render "Verdant AI" — at least two occurrences
+    expect(screen.getAllByText("Verdant AI").length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -223,9 +223,9 @@ describe("App footer", () => {
     expect(document.querySelector("footer")).toBeInTheDocument();
   });
 
-  it("footer contains VerdantMe branding", () => {
+  it("footer contains Verdant AI branding", () => {
     renderApp();
-    expect(document.querySelector("footer")?.textContent).toContain("VerdantMe");
+    expect(document.querySelector("footer")?.textContent).toContain("Verdant AI");
   });
 
   it("renders the About button", () => {
@@ -248,7 +248,7 @@ describe("App footer", () => {
     fireEvent.click(screen.getByRole("button", { name: /^About$/i }));
     await waitFor(() => {
       expect(screen.getByRole("dialog")).toBeInTheDocument();
-      expect(screen.getByText("About VerdantMe")).toBeInTheDocument();
+      expect(screen.getByText("About Verdant AI")).toBeInTheDocument();
     });
   });
 
