@@ -19,6 +19,10 @@ export function LandingPage() {
   const typewriterRef = useRef<HTMLDivElement>(null);
   const hasStartedTyping = useRef(false);
 
+  // Upcoming event slide-in animation
+  const upcomingRef = useRef<HTMLDivElement>(null);
+  const [upcomingVisible, setUpcomingVisible] = useState(false);
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -49,6 +53,22 @@ export function LandingPage() {
       setShowCursor((prev) => !prev);
     }, 530);
     return () => clearInterval(cursorInterval);
+  }, []);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setUpcomingVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.3 }
+    );
+    if (upcomingRef.current) {
+      observer.observe(upcomingRef.current);
+    }
+    return () => observer.disconnect();
   }, []);
 
   async function handleWaitlist(e: FormEvent) {
@@ -288,7 +308,16 @@ export function LandingPage() {
                       Connected to <span style={{ color: "#22c55e" }}>3</span> services
                     </div>
                   </div>
-                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "1rem" }}>
+                  <div
+                    ref={upcomingRef}
+                    style={{
+                      borderTop: "1px solid rgba(255,255,255,0.05)",
+                      paddingTop: "1rem",
+                      transform: upcomingVisible ? "translateY(0)" : "translateY(24px)",
+                      opacity: upcomingVisible ? 1 : 0,
+                      transition: "transform 0.55s cubic-bezier(0.22,1,0.36,1), opacity 0.55s ease",
+                    }}
+                  >
                     <div className="font-label uppercase tracking-widest mb-2" style={{ fontSize: "10px", color: "#40ceed" }}>
                       Upcoming
                     </div>
