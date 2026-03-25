@@ -10,7 +10,7 @@ const items = [
   { label: "Craft", icon: "description", tab: "resume" },
   { label: "Companies", icon: "apartment", tab: "companies" },
   { label: "Roles", icon: "explore", tab: "roles" },
-  { label: "Pipeline", icon: "dynamic_feed", tab: "pipeline" },
+  { label: "Tracking", icon: "dynamic_feed", tab: "pipeline" },
 ];
 
 export function MobileNav({ activeTab, onTabChange }: MobileNavProps) {

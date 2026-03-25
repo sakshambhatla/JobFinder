@@ -12,11 +12,13 @@ log = logging.getLogger(__name__)
 
 from jobfinder.api.auth import get_current_user
 from jobfinder.api.models import (
+    AnalyzeOfferRequest,
     ApplySyncSuggestionsRequest,
     CreatePipelineEntryRequest,
     CreatePipelineUpdateRequest,
     PipelineSyncRequest,
     ReorderPipelineRequest,
+    SaveOfferContextRequest,
     UpdatePipelineEntryRequest,
 )
 from jobfinder.storage import get_storage_backend
@@ -473,12 +475,16 @@ async def apply_sync_suggestions(
         stage_entries = [e for e in entries if e.get("stage") == stage]
         max_order = max((e.get("sort_order", 0) for e in stage_entries), default=-1)
 
+        entry_source = new_co.source if new_co.source in ("gmail", "linkedin") else None
+        source_label = "LinkedIn" if entry_source == "linkedin" else "Gmail"
+
         new_entry = {
             "id": str(uuid.uuid4()),
             "company_name": new_co.company_name,
             "role_title": None,
             "stage": stage,
-            "note": f"Detected via {new_co.source}: {new_co.reason}",
+            "source": entry_source,
+            "note": f"Detected via {source_label}: {new_co.reason}",
             "next_action": new_co.suggested_next_action,
             "badge": "new",
             "tags": [],
@@ -494,7 +500,7 @@ async def apply_sync_suggestions(
             "update_type": "created",
             "from_stage": None,
             "to_stage": stage,
-            "message": f"Added {new_co.company_name} (detected via {new_co.source})",
+            "message": f"Added {new_co.company_name} (detected via {source_label})",
             "created_at": now,
         })
         created += 1
@@ -503,3 +509,139 @@ async def apply_sync_suggestions(
     store.write("pipeline_updates.json", updates)
 
     return {"applied": applied, "created": created}
+
+
+# ── Offer Analysis ──────────────────────────────────────────────────────────
+
+
+@router.get("/pipeline/offers")
+async def list_offer_entries(
+    _auth: tuple[str, str] | None = Depends(get_current_user),
+) -> dict:
+    """Return pipeline entries in the 'offer' stage."""
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
+    entries = store.read("pipeline_entries.json") or []
+    offer_entries = [e for e in entries if e.get("stage") == "offer"]
+    return {"entries": offer_entries, "total": len(offer_entries)}
+
+
+@router.get("/pipeline/offer-analyses")
+async def list_offer_analyses(
+    _auth: tuple[str, str] | None = Depends(get_current_user),
+) -> dict:
+    """Return all offer analyses for this user."""
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
+    analyses = store.read("offer_analyses.json") or []
+    return {"analyses": analyses}
+
+
+@router.post("/pipeline/offer-analyses")
+async def create_offer_analysis(
+    req: AnalyzeOfferRequest,
+    _auth: tuple[str, str] | None = Depends(get_current_user),
+) -> dict:
+    """Run LLM analysis on an offer company and persist results."""
+    from jobfinder.config import load_config, resolve_api_key
+    from jobfinder.pipeline.offer_analysis import analyze_offer
+
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
+
+    overrides: dict = {}
+    if req.model_provider:
+        overrides["model_provider"] = req.model_provider
+    config = load_config(**overrides)
+
+    try:
+        api_key = resolve_api_key(config.model_provider, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Look up role_title from pipeline entry if available
+    entries = store.read("pipeline_entries.json") or []
+    role_title = None
+    for e in entries:
+        if e.get("company_name", "").lower() == req.company_name.lower() and e.get("stage") == "offer":
+            role_title = e.get("role_title")
+            break
+
+    result = await asyncio.to_thread(
+        analyze_offer,
+        req.company_name,
+        role_title,
+        req.personal_context,
+        api_key,
+        config.model_provider,
+    )
+
+    # Upsert into storage
+    analyses = store.read("offer_analyses.json") or []
+    now = datetime.now(timezone.utc).isoformat()
+
+    existing = None
+    for a in analyses:
+        if a.get("company_name", "").lower() == req.company_name.lower():
+            existing = a
+            break
+
+    entry = {
+        "id": existing["id"] if existing else str(uuid.uuid4()),
+        "company_name": req.company_name,
+        "personal_context": req.personal_context,
+        **result,
+        "model_provider": config.model_provider,
+        "model_name": None,
+        "created_at": existing.get("created_at", now) if existing else now,
+        "updated_at": now,
+    }
+
+    if existing:
+        analyses = [entry if a.get("id") == existing["id"] else a for a in analyses]
+    else:
+        analyses.append(entry)
+
+    store.write("offer_analyses.json", analyses)
+    return entry
+
+
+@router.put("/pipeline/offer-context/{company_name}")
+async def save_offer_context(
+    company_name: str,
+    req: SaveOfferContextRequest,
+    _auth: tuple[str, str] | None = Depends(get_current_user),
+) -> dict:
+    """Save personal context for an offer company without running analysis."""
+    user_id, jwt_token = _auth if _auth else (None, None)
+    store = get_storage_backend(user_id, jwt_token)
+
+    analyses = store.read("offer_analyses.json") or []
+    now = datetime.now(timezone.utc).isoformat()
+
+    existing = None
+    for a in analyses:
+        if a.get("company_name", "").lower() == company_name.lower():
+            existing = a
+            break
+
+    if existing:
+        existing["personal_context"] = req.personal_context
+        existing["updated_at"] = now
+    else:
+        analyses.append({
+            "id": str(uuid.uuid4()),
+            "company_name": company_name,
+            "personal_context": req.personal_context,
+            "dimensions": [],
+            "weighted_score": None,
+            "raw_average": None,
+            "verdict": None,
+            "key_question": None,
+            "flags": {"red": 0, "yellow": 0, "green": 0},
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    store.write("offer_analyses.json", analyses)
+    return {"ok": True}

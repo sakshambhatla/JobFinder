@@ -143,7 +143,7 @@ class ExternalJobCacheEntry(BaseModel):
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 
 PIPELINE_STAGES = {
-    "not_started", "recruiter", "hm_screen", "onsite", "offer", "blocked", "rejected",
+    "not_started", "outreach", "recruiter", "hm_screen", "onsite", "offer", "blocked", "rejected",
 }
 PIPELINE_BADGES = {"done", "new", "panel", "await", "sched"}
 
@@ -159,6 +159,7 @@ class PipelineEntry(BaseModel):
     badge: str | None = None
     tags: list[str] = []
     sort_order: int = 0
+    source: str | None = None  # "gmail" | "linkedin" | None
     created_at: str = ""
     updated_at: str = ""
 
@@ -177,6 +178,44 @@ class PipelineEntry(BaseModel):
         if isinstance(v, str) and v in PIPELINE_BADGES:
             return v
         return None
+
+
+# ── Offer Analysis ───────────────────────────────────────────────────────────
+
+OFFER_FLAGS = {"red", "yellow", "green"}
+
+
+class OfferAnalysisDimension(BaseModel):
+    """A single scored dimension in an offer analysis."""
+    name: str
+    score: int  # 1-5
+    weight: float  # 1.0 or 1.5
+    rationale: str = ""
+    flag: str = "yellow"  # "red" | "yellow" | "green"
+
+    @field_validator("flag", mode="before")
+    @classmethod
+    def validate_flag(cls, v: object) -> str:
+        if isinstance(v, str) and v in OFFER_FLAGS:
+            return v
+        return "yellow"
+
+
+class OfferAnalysis(BaseModel):
+    """LLM-powered company evaluation for an offer-stage pipeline entry."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_name: str
+    personal_context: str = ""
+    dimensions: list[OfferAnalysisDimension] = []
+    weighted_score: float | None = None
+    raw_average: float | None = None
+    verdict: str | None = None
+    key_question: str | None = None
+    flags: dict[str, int] = Field(default_factory=lambda: {"red": 0, "yellow": 0, "green": 0})
+    model_provider: str | None = None
+    model_name: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
 
 
 class PipelineUpdate(BaseModel):

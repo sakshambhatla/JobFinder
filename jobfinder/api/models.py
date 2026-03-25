@@ -94,3 +94,16 @@ class SyncSuggestionApply(BaseModel):
 class ApplySyncSuggestionsRequest(BaseModel):
     suggestions: list[SyncSuggestionApply] = []  # accepted updates to existing entries
     new_companies: list[SyncSuggestionApply] = []  # accepted new companies to add
+
+
+# ── Offer Analysis ──────────────────────────────────────────────────────────
+
+class AnalyzeOfferRequest(BaseModel):
+    company_name: str
+    personal_context: str = ""
+    model_provider: str | None = None  # override LLM provider
+
+
+class SaveOfferContextRequest(BaseModel):
+    company_name: str
+    personal_context: str

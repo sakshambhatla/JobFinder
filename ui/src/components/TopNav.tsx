@@ -11,7 +11,7 @@ const navItems = [
   { label: "Craft Resume", tab: "resume", path: "/app" },
   { label: "Discover Companies", tab: "companies", path: "/app" },
   { label: "Discover Roles", tab: "roles", path: "/app" },
-  { label: "Pipeline", tab: "pipeline", path: "/app/pipeline" },
+  { label: "Tracking", tab: "pipeline", path: "/app/pipeline" },
 ];
 
 export function TopNav({ activeTab, onTabChange }: TopNavProps) {

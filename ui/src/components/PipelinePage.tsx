@@ -258,7 +258,7 @@ export function PipelinePage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-2xl font-bold text-white/90">
-            Job Pipeline
+            Tracking
           </h2>
           <p className="text-sm text-white/35 mt-0.5">
             {entries.length} companies tracked

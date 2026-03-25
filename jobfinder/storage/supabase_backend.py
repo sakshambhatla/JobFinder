@@ -169,6 +169,12 @@ class SupabaseStorageBackend:
                 "exists": self._exists_pipeline_updates,
                 "delete": self._delete_pipeline_updates,
             },
+            "offer_analyses.json": {
+                "read": self._read_offer_analyses,
+                "write": self._write_offer_analyses,
+                "exists": self._exists_offer_analyses,
+                "delete": self._delete_offer_analyses,
+            },
         }
         return handlers.get(collection)
 
@@ -813,6 +819,7 @@ class SupabaseStorageBackend:
                 "badge": entry.get("badge"),
                 "tags": entry.get("tags", []),
                 "sort_order": entry.get("sort_order", 0),
+                "source": entry.get("source"),
                 "created_at": entry.get("created_at") or datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -842,6 +849,7 @@ class SupabaseStorageBackend:
             "badge": row.get("badge"),
             "tags": row.get("tags", []),
             "sort_order": row.get("sort_order", 0),
+            "source": row.get("source"),
             "created_at": row.get("created_at", ""),
             "updated_at": row.get("updated_at", ""),
         }
@@ -898,4 +906,72 @@ class SupabaseStorageBackend:
             "to_stage": row.get("to_stage"),
             "message": row.get("message", ""),
             "created_at": row.get("created_at", ""),
+        }
+
+    # ── Offer Analyses ─────────────────────────────────────────────────────────
+
+    def _read_offer_analyses(self) -> list | None:
+        resp = (
+            self._client.table("offer_analyses")
+            .select("*")
+            .eq("user_id", self._user_id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        if not resp.data:
+            return None
+        return [self._row_to_offer_analysis(r) for r in resp.data]
+
+    _DEFAULT_FLAGS = {"red": 0, "yellow": 0, "green": 0}
+
+    def _write_offer_analyses(self, data: list) -> None:
+        if not isinstance(data, list):
+            return
+        for analysis in data:
+            row = {
+                "id": analysis.get("id"),
+                "user_id": self._user_id,
+                "company_name": analysis.get("company_name", ""),
+                "personal_context": analysis.get("personal_context", ""),
+                "dimensions": analysis.get("dimensions", []),
+                "weighted_score": analysis.get("weighted_score"),
+                "raw_average": analysis.get("raw_average"),
+                "verdict": analysis.get("verdict"),
+                "key_question": analysis.get("key_question"),
+                "flags": analysis.get("flags", self._DEFAULT_FLAGS),
+                "model_provider": analysis.get("model_provider"),
+                "model_name": analysis.get("model_name"),
+                "created_at": analysis.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._client.table("offer_analyses").upsert(row, on_conflict="id").execute()
+
+    def _exists_offer_analyses(self) -> bool:
+        resp = (
+            self._client.table("offer_analyses")
+            .select("id", count="exact")
+            .eq("user_id", self._user_id)
+            .execute()
+        )
+        return (resp.count or 0) > 0
+
+    def _delete_offer_analyses(self) -> None:
+        self._client.table("offer_analyses").delete().eq("user_id", self._user_id).execute()
+
+    @staticmethod
+    def _row_to_offer_analysis(row: dict) -> dict:
+        return {
+            "id": row["id"],
+            "company_name": row.get("company_name", ""),
+            "personal_context": row.get("personal_context", ""),
+            "dimensions": row.get("dimensions", []),
+            "weighted_score": float(row["weighted_score"]) if row.get("weighted_score") is not None else None,
+            "raw_average": float(row["raw_average"]) if row.get("raw_average") is not None else None,
+            "verdict": row.get("verdict"),
+            "key_question": row.get("key_question"),
+            "flags": row.get("flags") or self._DEFAULT_FLAGS,
+            "model_provider": row.get("model_provider"),
+            "model_name": row.get("model_name"),
+            "created_at": row.get("created_at", ""),
+            "updated_at": row.get("updated_at", ""),
         }

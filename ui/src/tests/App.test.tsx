@@ -106,7 +106,7 @@ describe("App top navigation", () => {
     expect(screen.getByRole("button", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Craft Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discover Roles" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pipeline" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tracking" })).toBeInTheDocument();
   });
 
   it("Craft Resume is active by default (resume tab)", () => {
@@ -168,9 +168,9 @@ describe("Job Pipeline page", () => {
     expect(screen.getByText(/Loading pipeline/i)).toBeInTheDocument();
   });
 
-  it("renders the Pipeline nav button", () => {
+  it("renders the Tracking nav button", () => {
     renderApp();
-    expect(screen.getByRole("button", { name: /^Pipeline$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Tracking$/i })).toBeInTheDocument();
   });
 
   it("does not show upload content on /app/pipeline", () => {
