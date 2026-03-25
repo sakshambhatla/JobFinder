@@ -33,7 +33,7 @@ export default function PipelineColumn({ stage, entries, onEdit, onDrop }: Props
 
   return (
     <div
-      className="flex flex-col min-w-[220px] max-w-[260px]"
+      className="flex flex-col w-[168px] shrink-0"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

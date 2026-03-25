@@ -724,6 +724,70 @@ export async function applySyncSuggestions(
   return data;
 }
 
+// ─── Offer Analysis ─────────────────────────────────────────────────────────
+
+export interface OfferDimension {
+  name: string;
+  score: number; // 1-5
+  weight: number; // 1.0 or 1.5
+  rationale: string;
+  flag: "red" | "yellow" | "green";
+}
+
+export interface OfferAnalysis {
+  id: string;
+  company_name: string;
+  personal_context: string;
+  dimensions: OfferDimension[];
+  weighted_score: number | null;
+  raw_average: number | null;
+  verdict: string | null;
+  key_question: string | null;
+  flags: { red: number; yellow: number; green: number };
+  model_provider: string | null;
+  model_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getOfferEntries(): Promise<{
+  entries: PipelineEntry[];
+  total: number;
+}> {
+  const { data } = await api.get("/pipeline/offers");
+  return data;
+}
+
+export async function getOfferAnalyses(): Promise<{
+  analyses: OfferAnalysis[];
+}> {
+  const { data } = await api.get("/pipeline/offer-analyses");
+  return data;
+}
+
+export async function analyzeOffer(
+  companyName: string,
+  personalContext: string,
+  modelProvider?: string,
+): Promise<OfferAnalysis> {
+  const { data } = await api.post("/pipeline/offer-analyses", {
+    company_name: companyName,
+    personal_context: personalContext,
+    model_provider: modelProvider,
+  });
+  return data;
+}
+
+export async function saveOfferContext(
+  companyName: string,
+  personalContext: string,
+): Promise<void> {
+  await api.put(
+    `/pipeline/offer-context/${encodeURIComponent(companyName)}`,
+    { company_name: companyName, personal_context: personalContext },
+  );
+}
+
 // ─── Browser Agent ───────────────────────────────────────────────────────────
 
 /** Send a kill signal to a running browser agent. */

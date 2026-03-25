@@ -4,6 +4,7 @@ import { ResumeTab } from "@/components/ResumeTab";
 import { CompaniesTab } from "@/components/CompaniesTab";
 import { RolesTab } from "@/components/RolesTab";
 import { PipelinePage } from "@/components/PipelinePage";
+import { OffersPage } from "@/components/OffersPage";
 import { DebugLogPanel } from "@/components/DebugLogPanel";
 import { TopNav } from "@/components/TopNav";
 import { SideNav } from "@/components/SideNav";
@@ -20,7 +21,8 @@ function App() {
   const [activeTab, setActiveTab] = useState("resume");
   const location = useLocation();
   const navigate = useNavigate();
-  const showPipeline = location.pathname === "/app/pipeline";
+  const showPipeline = location.pathname.startsWith("/app/pipeline");
+  const showOffers = location.pathname === "/app/pipeline/offers";
 
   // ── Conditional renders ─────────────────────────────────────────────────────
 
@@ -46,7 +48,15 @@ function App() {
     if (showPipeline) navigate("/app");
   };
 
+  const handleSideNavClick = (id: string) => {
+    if (id === "pipeline") navigate("/app/pipeline");
+    else if (id === "offers") navigate("/app/pipeline/offers");
+  };
+
+  const sideNavActiveItem = showOffers ? "offers" : "pipeline";
+
   const renderContent = () => {
+    if (showOffers) return <OffersPage />;
     if (showPipeline) return <PipelinePage />;
 
     switch (activeTab) {
@@ -71,7 +81,7 @@ function App() {
   return (
     <div className="app-shell min-h-screen">
       <TopNav activeTab={activeTab} onTabChange={handleTabChange} />
-      <SideNav />
+      <SideNav activeItem={sideNavActiveItem} onItemClick={handleSideNavClick} />
 
       <main className="ml-0 md:ml-64 pt-24 pb-20 px-8 min-h-screen relative overflow-hidden">
         <div className="asymmetric-glow" />

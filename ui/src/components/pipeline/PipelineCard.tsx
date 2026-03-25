@@ -45,6 +45,18 @@ export default function PipelineCard({ entry, onEdit, isDragging }: Props) {
               </span>
             )}
           </div>
+          {entry.tags.length > 0 && (
+            <div className="flex flex-nowrap gap-1 mt-1 overflow-hidden">
+              {entry.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium text-white/40 bg-white/5 border border-white/10 capitalize"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
           {entry.role_title && (
             <div className="text-[11px] text-white/40 mt-0.5 truncate">
               {entry.role_title}
@@ -64,20 +76,6 @@ export default function PipelineCard({ entry, onEdit, isDragging }: Props) {
           </span>
         )}
       </div>
-
-      {/* Tags */}
-      {entry.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1.5">
-          {entry.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded px-1.5 py-0.5 text-[9px] font-medium text-white/40 bg-white/5 border border-white/10 capitalize"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* Next action */}
       {entry.next_action && (
