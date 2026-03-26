@@ -36,5 +36,6 @@ local.patch
 security-concerns.md
 learnings.md
 plans/
+.claude/skills/
 supabase/.temp/
 todo/
