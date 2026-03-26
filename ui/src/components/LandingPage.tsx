@@ -402,7 +402,7 @@ export function LandingPage() {
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-8 text-xs uppercase tracking-widest" style={{ fontFamily: "Inter" }}>
-            <a href="#" className="text-slate-500 hover:text-white transition-colors no-underline">Privacy Policy</a>
+            <Link to="/privacy" className="text-slate-500 hover:text-white transition-colors no-underline">Privacy Policy</Link>
             <a href="#" className="text-slate-500 hover:text-white transition-colors no-underline">Terms of Service</a>
             <Link to="/about" className="text-slate-500 hover:text-white transition-colors no-underline">About</Link>
             <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-white transition-colors no-underline">LinkedIn</a>
