@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -415,6 +416,281 @@ async def discover_roles_endpoint(
     set_run_context(None)
 
     return output
+
+
+@router.post("/roles/discover/stream")
+async def discover_roles_stream(
+    req: DiscoverRolesRequest,
+    request: Request,
+    _auth: tuple[str, str] | None = Depends(get_current_user),
+):
+    """SSE-streaming version of role discovery.
+
+    Keeps the connection alive via automatic keepalive pings (every 15 s)
+    so reverse proxies (Render, Cloudflare, etc.) do not kill
+    long-running requests.
+
+    Events emitted:
+      * ``progress`` — status message (e.g. "Fetching roles…")
+      * ``done``     — final JSON result (same shape as POST /roles/discover)
+      * ``error``    — error detail string
+    """
+    from sse_starlette.sse import EventSourceResponse
+
+    user_id, jwt_token = _auth if _auth else (None, None)
+
+    # ── Validate inputs (fail fast before opening the stream) ────────────
+    overrides: dict = {}
+    if req.model_provider is not None:
+        overrides["model_provider"] = req.model_provider
+    if req.relevance_score_criteria is not None:
+        overrides["relevance_score_criteria"] = req.relevance_score_criteria
+    if req.role_filters is not None:
+        overrides["role_filters"] = req.role_filters.model_dump()
+    if req.skip_career_page is not None:
+        overrides["skip_career_page"] = req.skip_career_page
+
+    store = get_storage_backend(user_id, jwt_token)
+    cp = _make_checkpoint(store)
+
+    companies_data = store.read("companies.json")
+
+    # Resolve company_run_id → company_names
+    effective_company_names = req.company_names
+    enable_yc_from_run = False
+    if req.company_run_id and not effective_company_names:
+        all_runs: list[dict] = store.read("company_runs.json") or []
+        matched_run = next((r for r in all_runs if r.get("id") == req.company_run_id), None)
+        if matched_run is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Company run '{req.company_run_id}' not found.",
+            )
+        effective_company_names = [c["name"] for c in matched_run.get("companies", [])]
+        if matched_run.get("focus") == "startups":
+            enable_yc_from_run = True
+
+    if req.enable_yc_jobs or enable_yc_from_run:
+        overrides["enable_yc_jobs"] = True
+
+    config = load_config(**overrides)
+
+    if companies_data is None and not effective_company_names and not (req.resume and cp.exists()):
+        raise HTTPException(
+            status_code=400,
+            detail="No companies found. Run company discovery first.",
+        )
+    companies_data = companies_data or {}
+
+    api_key: str | None = None
+    _local_strategy = (
+        config.role_filters is not None
+        and getattr(config.role_filters, "filter_strategy", "llm") in ("fuzzy", "semantic")
+    )
+    if (config.role_filters and not _local_strategy) or config.relevance_score_criteria:
+        try:
+            api_key = resolve_api_key(config.model_provider, user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # ── SSE generator ────────────────────────────────────────────────────
+
+    async def event_generator():
+        job_run_id = str(uuid.uuid4())
+        existing_job_runs: list[dict] = store.read("job_runs.json") or []
+        existing_run_names = {r.get("run_name", "") for r in existing_job_runs}
+        existing_company_runs_list: list[dict] = store.read("company_runs.json") or []
+        existing_run_names.update(r.get("run_name", "") for r in existing_company_runs_list)
+        job_run_name = generate_run_name(existing_run_names)
+        started_at = datetime.now(timezone.utc).isoformat()
+        collector = RunMetricsCollector()
+        set_run_context(job_run_id)
+
+        try:
+            yield {"event": "progress", "data": json.dumps({"message": "Starting role discovery…"})}
+
+            # ── Resolve companies & fetch roles ──────────────────────────
+            if req.resume and cp.exists():
+                cp.load()
+                raw_companies = companies_data.get("companies", [])
+                companies = [DiscoveredCompany.model_validate(c) for c in raw_companies]
+                roles = [DiscoveredRole.model_validate(r) for r in cp.raw_roles]
+                flagged_dicts = cp.flagged_companies
+                resume_filter_batches = cp.filter_batches_done
+                resume_filter_kept = [
+                    DiscoveredRole.model_validate(r) for r in cp.filter_kept_roles
+                ]
+                resume_score_batches = cp.score_batches_done
+                yield {"event": "progress", "data": json.dumps({"message": "Resumed from checkpoint."})}
+            else:
+                if effective_company_names:
+                    registry: list[dict] = load_or_bootstrap_registry(store)
+                    reg_map = {e["name"].lower(): e for e in registry}
+                    selected = [reg_map[n.lower()] for n in effective_company_names if n.lower() in reg_map]
+                    missing = [n for n in effective_company_names if n.lower() not in reg_map]
+                    if missing:
+                        yield {
+                            "event": "error",
+                            "data": json.dumps({"detail": f"Companies not found in registry: {', '.join(missing)}"}),
+                        }
+                        return
+                    raw_companies = [
+                        {**e, "reason": "", "discovered_at": "", "roles_fetched": False}
+                        for e in selected
+                    ]
+                else:
+                    raw_companies = companies_data.get("companies", [])
+
+                companies = [DiscoveredCompany.model_validate(c) for c in raw_companies]
+                effective_use_cache = req.use_cache and not req.refresh
+
+                def _on_progress(
+                    current_roles: list[DiscoveredRole],
+                    current_flagged: list,
+                ) -> None:
+                    flagged_dicts_snap = [f.model_dump() for f in current_flagged]
+                    store.write("roles_unfiltered.json", {
+                        "fetched_at": datetime.now(timezone.utc).isoformat(),
+                        "total_roles": len(current_roles),
+                        "companies_fetched": len(companies) - len(flagged_dicts_snap),
+                        "companies_flagged": len(flagged_dicts_snap),
+                        "flagged_companies": flagged_dicts_snap,
+                        "roles": [r.model_dump() for r in current_roles],
+                        "in_progress": True,
+                    })
+
+                yield {"event": "progress", "data": json.dumps({"message": f"Fetching roles for {len(companies)} companies…"})}
+
+                try:
+                    roles, flagged = await asyncio.to_thread(
+                        discover_roles, companies, config,
+                        store=store, use_cache=effective_use_cache, on_progress=_on_progress,
+                        metrics=collector,
+                    )
+                except Exception as exc:
+                    _persist_job_run(
+                        store, job_run_id, job_run_name, req.company_run_id,
+                        [c.name for c in companies], collector, started_at,
+                        status="failed", existing_runs=existing_job_runs,
+                    )
+                    yield {"event": "error", "data": json.dumps({"detail": f"Role discovery failed: {exc}"})}
+                    return
+
+                flagged_dicts = [f.model_dump() for f in flagged]
+                cp.save_after_fetch(
+                    raw_roles=roles,
+                    flagged=flagged,
+                    filter_config=config.role_filters.model_dump() if config.role_filters else None,
+                    score_criteria=config.relevance_score_criteria,
+                    filter_batch_size=100,
+                    score_batch_size=60,
+                )
+                resume_filter_batches = 0
+                resume_filter_kept = []
+                resume_score_batches = 0
+
+            yield {"event": "progress", "data": json.dumps({"message": f"Fetched {len(roles)} roles."})}
+
+            # ── Persist unfiltered snapshot ───────────────────────────────
+            unfiltered_output = {
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "total_roles": len(roles),
+                "companies_fetched": len(companies) - len(flagged_dicts),
+                "companies_flagged": len(flagged_dicts),
+                "flagged_companies": flagged_dicts,
+                "roles": [r.model_dump() for r in roles],
+                "in_progress": False,
+            }
+            store.write("roles_unfiltered.json", unfiltered_output)
+
+            # ── Filter ───────────────────────────────────────────────────
+            filtered_roles = roles
+            if config.role_filters and roles:
+                from jobfinder.roles.filters import filter_roles
+                yield {"event": "progress", "data": json.dumps({"message": "Filtering roles…"})}
+                try:
+                    filtered_roles = await asyncio.to_thread(
+                        filter_roles,
+                        roles, config.role_filters, config,
+                        checkpoint=cp,
+                        resume_batches=resume_filter_batches,
+                        resume_kept=resume_filter_kept,
+                        api_key=api_key,
+                        metrics=collector,
+                    )
+                except RateLimitError as exc:
+                    yield {
+                        "event": "error",
+                        "data": json.dumps({
+                            "detail": f"{exc}  ({len(roles)} raw roles saved — no re-fetching needed.)",
+                            "status_code": 429,
+                        }),
+                    }
+                    return
+
+            # ── Score ────────────────────────────────────────────────────
+            scored_roles = filtered_roles
+            if config.relevance_score_criteria and filtered_roles:
+                from jobfinder.roles.scorer import score_roles
+                yield {"event": "progress", "data": json.dumps({"message": "Scoring roles…"})}
+                try:
+                    scored_roles = await asyncio.to_thread(
+                        score_roles,
+                        filtered_roles, config.relevance_score_criteria, config,
+                        checkpoint=cp,
+                        resume_batches=resume_score_batches,
+                        api_key=api_key,
+                        metrics=collector,
+                    )
+                except RateLimitError as exc:
+                    yield {
+                        "event": "error",
+                        "data": json.dumps({
+                            "detail": f"{exc}  (Filtering complete: {len(filtered_roles)} roles — no re-filtering needed.)",
+                            "status_code": 429,
+                        }),
+                    }
+                    return
+
+            # ── Merge & persist ──────────────────────────────────────────
+            final_roles = scored_roles
+            if config.write_preference == "merge" and store.exists("roles.json"):
+                existing_data = store.read("roles.json") or {}
+                existing_roles = [
+                    DiscoveredRole.model_validate(r)
+                    for r in existing_data.get("roles", [])
+                ]
+                seen: dict[str, DiscoveredRole] = {r.url: r for r in existing_roles}
+                for r in scored_roles:
+                    seen[r.url] = r
+                final_roles = sorted(seen.values(), key=lambda r: -(r.relevance_score or 0))
+
+            output = {
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "total_roles": len(roles),
+                "roles_after_filter": len(filtered_roles),
+                "companies_fetched": len(companies) - len(flagged_dicts),
+                "companies_flagged": len(flagged_dicts),
+                "flagged_companies": flagged_dicts,
+                "roles": [r.model_dump() for r in final_roles],
+                "job_run_id": job_run_id,
+                "job_run_name": job_run_name,
+            }
+            store.write("roles.json", output)
+            cp.delete()
+
+            _persist_job_run(
+                store, job_run_id, job_run_name, req.company_run_id,
+                [c.name for c in companies], collector, started_at,
+                status="completed", existing_runs=existing_job_runs,
+            )
+
+            yield {"event": "done", "data": json.dumps(output)}
+
+        finally:
+            set_run_context(None)
+
+    return EventSourceResponse(event_generator())
 
 
 @router.get("/roles/unfiltered")

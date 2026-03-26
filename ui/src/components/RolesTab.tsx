@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-table";
 import {
   browserAgentStreamUrl,
-  discoverRoles,
+  discoverRolesStream,
   getCompanyRuns,
   getJobRuns,
   killBrowserAgent,
@@ -951,7 +951,7 @@ export function RolesTab() {
   const discover = useMutation({
     mutationFn: (resume: boolean) => {
       const hasFilters = titleFilter || locationFilter || postedAfter;
-      return discoverRoles({
+      return discoverRolesStream({
         resume,
         refresh: true,
         use_cache: useCache,

@@ -32,6 +32,7 @@ routes/
 | GET | `/api/companies` | Reads `companies.json`, 404 if absent |
 | GET | `/api/companies/registry` | Returns perpetual per-user company registry |
 | POST | `/api/roles/discover` | ATS fetch + filter + score; writes `roles.json` + `job_runs.json` |
+| POST | `/api/roles/discover/stream` | SSE-streaming version of role discovery; emits `progress`, `done`, `error`; auto-keepalive via sse_starlette pings (15 s) — used by the UI to avoid proxy timeouts |
 | GET | `/api/roles` | Reads `roles.json`, 404 if absent |
 | GET | `/api/roles/unfiltered` | Reads `roles_unfiltered.json` |
 | GET | `/api/roles/checkpoint` | Returns checkpoint summary for resume-able runs |
