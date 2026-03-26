@@ -266,7 +266,7 @@ class SupabaseStorageBackend:
                 "reason": c.get("reason", ""),
                 "discovered_at": c.get("discovered_at") or datetime.now(timezone.utc).isoformat(),
             }
-            self._client.table("companies").insert(row).execute()
+            self._client.table("companies").upsert(row, on_conflict="user_id,name").execute()
 
     def _exists_companies(self) -> bool:
         resp = (
@@ -451,7 +451,7 @@ class SupabaseStorageBackend:
                 "career_page_url": c.get("career_page_url", ""),
                 "searchable": c.get("searchable") or False,
             }
-            self._client.table("company_registry").insert(row).execute()
+            self._client.table("company_registry").upsert(row, on_conflict="user_id,name").execute()
 
     def _exists_registry(self) -> bool:
         resp = (
