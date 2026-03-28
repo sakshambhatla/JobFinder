@@ -81,6 +81,7 @@ export function PipelinePage() {
     qc.invalidateQueries({ queryKey: ["pipeline-entries"] });
     qc.invalidateQueries({ queryKey: ["pipeline-stats"] });
     qc.invalidateQueries({ queryKey: ["pipeline-updates"] });
+    qc.invalidateQueries({ queryKey: ["offer-entries"] });
   };
 
   const createMutation = useMutation({

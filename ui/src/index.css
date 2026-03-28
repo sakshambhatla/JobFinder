@@ -292,6 +292,12 @@ header.compact [role="tablist"] {
   pointer-events: none;
 }
 
+.login-input-glow:focus {
+  outline: none;
+  border-color: #53ddfc;
+  box-shadow: 0 0 15px rgba(83, 221, 252, 0.2);
+}
+
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }

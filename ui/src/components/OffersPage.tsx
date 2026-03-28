@@ -169,6 +169,9 @@ export function OffersPage() {
       setAnalyzingCompany(companyName);
       setAnalyzeError(null);
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["offer-analyses"] });
+    },
     onError: (err: unknown) => {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -177,7 +180,6 @@ export function OffersPage() {
     },
     onSettled: () => {
       setAnalyzingCompany(null);
-      qc.invalidateQueries({ queryKey: ["offer-analyses"] });
     },
   });
 
@@ -236,6 +238,13 @@ export function OffersPage() {
             When companies in your pipeline reach the Offer stage, they'll
             appear here for detailed evaluation.
           </p>
+        </div>
+      )}
+
+      {/* Analyze Error */}
+      {analyzeError && (
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-400 mb-4">
+          {analyzeError}
         </div>
       )}
 

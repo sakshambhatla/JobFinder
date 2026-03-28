@@ -94,10 +94,12 @@ def _build_prompt(
     gmail_summary = []
     for g in gmail_signals:
         source_tag = "[LINKEDIN]" if g.get("source") == "linkedin" else ""
+        # Prefer LLM body summary over raw snippet when available
+        summary_text = g.get("body_summary") or g.get("snippet", "")[:100]
         gmail_summary.append(
             f"- [{g.get('signal_type', '?')}]{source_tag} {g.get('company_name', '?')}: "
             f"subject=\"{g.get('subject', '')[:80]}\" | "
-            f"snippet=\"{g.get('snippet', '')[:100]}\" | {g.get('date', '')}"
+            f"summary=\"{summary_text}\" | {g.get('date', '')}"
         )
 
     calendar_summary = []
@@ -249,6 +251,7 @@ def _call_anthropic(
     prompt: str,
     api_key: str,
     model: str = "claude-sonnet-4-6",
+    max_tokens: int = 2000,
 ) -> str:
     """Call Anthropic API for pipeline reasoning."""
     import anthropic
@@ -256,7 +259,7 @@ def _call_anthropic(
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
     return response.content[0].text
@@ -266,14 +269,17 @@ def _call_gemini(
     prompt: str,
     api_key: str,
     model: str = "gemini-2.5-flash-lite",
+    max_tokens: int = 2000,
 ) -> str:
     """Call Gemini API for pipeline reasoning."""
     from google import genai
+    from google.genai import types
 
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
         model=model,
         contents=prompt,
+        config=types.GenerateContentConfig(max_output_tokens=max_tokens),
     )
     return response.text
 

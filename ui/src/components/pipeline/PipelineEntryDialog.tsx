@@ -93,6 +93,8 @@ export default function PipelineEntryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-lg border"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
         style={{
           background: "rgba(15,15,20,0.95)",
           backdropFilter: "blur(20px)",

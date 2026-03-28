@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,14 @@ from jobfinder.utils.log_stream import init_log_stream
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Configure logging — pipeline module at DEBUG for diagnostic visibility
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("jobfinder.pipeline").setLevel(logging.DEBUG)
+
     config = load_config()
     # Keyed by (user_id, company_name); holds AgentSession objects for running browser agents
     app.state.running_agents: dict[tuple[str | None, str], object] = {}
@@ -22,7 +31,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="JobFinder", version="5.2.8", lifespan=lifespan)
+app = FastAPI(title="JobFinder", version="5.2.9", lifespan=lifespan)
 
 _cors_origins = os.environ.get(
     "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"

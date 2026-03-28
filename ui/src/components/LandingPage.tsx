@@ -168,40 +168,58 @@ export function LandingPage() {
               </div>
             </div>
 
-            {/* Hero visual */}
+            {/* Hero visual — Personalized Matches card */}
             <div className="lg:col-span-5 relative">
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-[#a3a6ff] to-[#53ddfc] rounded-xl blur opacity-25 group-hover:opacity-50 transition duration-1000" />
-                <div className="relative rounded-xl overflow-hidden aspect-square flex items-center justify-center" style={{ background: "#20201f" }}>
-                  {/* Abstract visualization placeholder */}
-                  <div className="w-full h-full relative">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-3/4 h-3/4 rounded-full opacity-20" style={{ background: "radial-gradient(circle, #a3a6ff 0%, transparent 70%)" }} />
+                <div className="relative rounded-xl overflow-hidden" style={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  {/* Card header */}
+                  <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#10b981", boxShadow: "0 0 8px rgba(16,185,129,0.6)" }} />
+                      <span className="font-label text-xs uppercase tracking-widest font-bold" style={{ color: "#e2e2e2" }}>Personalized Matches</span>
                     </div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-1/2 h-1/2 rounded-full opacity-30" style={{ background: "radial-gradient(circle, #53ddfc 0%, transparent 70%)" }} />
-                    </div>
-                    {/* Grid lines */}
-                    <svg className="absolute inset-0 w-full h-full opacity-10" viewBox="0 0 100 100">
-                      {Array.from({ length: 10 }, (_, i) => (
-                        <line key={`h${i}`} x1="0" y1={i * 10} x2="100" y2={i * 10} stroke="white" strokeWidth="0.2" />
-                      ))}
-                      {Array.from({ length: 10 }, (_, i) => (
-                        <line key={`v${i}`} x1={i * 10} y1="0" x2={i * 10} y2="100" stroke="white" strokeWidth="0.2" />
-                      ))}
-                    </svg>
+                    <span className="font-label text-xs uppercase tracking-widest" style={{ color: "rgba(173,170,170,0.45)" }}>Updated 2m ago</span>
                   </div>
-                  <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #20201f, transparent, transparent)" }} />
 
-                  {/* Match probability glass card */}
-                  <div className="absolute bottom-6 left-6 right-6 lp-glass-panel p-6 rounded-xl">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="font-label text-xs uppercase tracking-tighter" style={{ color: "#40ceed" }}>Match probability</div>
-                      <div className="text-xl font-bold font-headline">98.4%</div>
+                  {/* Job rows */}
+                  {[
+                    { title: "Staff Software Engineer, Platform", company: "Figma", companyColor: "#a3a6ff", salary: "$200K – $270K", location: "Remote, US", posted: "Jan 5, 2026", pct: "95%", label: "High Intent" },
+                    { title: "Senior Software Engineer, Infrastructure", company: "Linear", companyColor: "#53ddfc", salary: "$190K – $255K", location: "Remote", posted: "Jan 8, 2026", pct: "92%", label: "Strong Match" },
+                    { title: "Staff Engineer, Developer Tools", company: "Vercel", companyColor: "#d7d4f0", salary: "$195K – $260K", location: "Remote, US", posted: "Jan 10, 2026", pct: "90%", label: "Ideal Growth" },
+                  ].map((job, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start justify-between gap-4 px-6 py-5"
+                      style={{ borderBottom: i < 2 ? "1px solid rgba(255,255,255,0.05)" : undefined }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm text-white leading-snug mb-1">{job.title}</div>
+                        <div className="text-xs font-semibold mb-2" style={{ color: job.companyColor }}>{job.company}</div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-label text-xs uppercase tracking-wider" style={{ color: "rgba(173,170,170,0.6)" }}>
+                          <span>{job.salary}</span>
+                          <span style={{ color: "rgba(173,170,170,0.3)" }}>|</span>
+                          <span>{job.location}</span>
+                          <span style={{ color: "rgba(173,170,170,0.3)" }}>|</span>
+                          <span>Posted {job.posted}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end shrink-0">
+                        <div className="text-xl font-black font-headline" style={{ color: "#a3a6ff" }}>{job.pct}</div>
+                        <div className="font-label text-xs uppercase tracking-widest" style={{ color: "rgba(173,170,170,0.5)" }}>{job.label}</div>
+                      </div>
                     </div>
-                    <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "#131313" }}>
-                      <div className="pulse-gradient h-full" style={{ width: "98%" }} />
-                    </div>
+                  ))}
+
+                  {/* Footer CTA */}
+                  <div className="px-6 py-4">
+                    <button
+                      onClick={() => navigate("/app")}
+                      className="w-full py-3 rounded-lg font-label text-xs uppercase tracking-widest font-bold transition-colors cursor-pointer"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(173,170,170,0.7)" }}
+                    >
+                      View All Open Matches
+                    </button>
                   </div>
                 </div>
               </div>

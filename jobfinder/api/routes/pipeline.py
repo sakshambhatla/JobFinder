@@ -329,9 +329,25 @@ async def sync_pipeline(
             lookback = min(max(req.lookback_days if req else 3, 1), 14)
             phrases = req.custom_phrases if req else []
 
+            # Resolve LLM key for Gmail classification (best-effort)
+            gmail_api_key = None
+            gmail_provider = None
+            from jobfinder.config import SUPPORTED_PROVIDERS, load_config, resolve_api_key as _resolve
+
+            _cfg = load_config(**({"model_provider": req.model_provider} if req and req.model_provider else {}))
+            for _p in [_cfg.model_provider] + [x for x in SUPPORTED_PROVIDERS if x != _cfg.model_provider]:
+                try:
+                    gmail_api_key = _resolve(_p, user_id)
+                    gmail_provider = _p
+                    log.info("Pipeline sync: resolved %s key for Gmail LLM classification", _p)
+                    break
+                except ValueError:
+                    pass
+
             raw_gmail = await asyncio.to_thread(
                 scan_gmail, tokens, entries,
                 lookback_days=lookback, custom_phrases=phrases,
+                api_key=gmail_api_key, provider=gmail_provider,
             )
             gmail_signals = [s.to_dict() for s in raw_gmail]
 
