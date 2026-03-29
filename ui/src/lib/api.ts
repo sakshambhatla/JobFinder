@@ -283,6 +283,22 @@ export async function discoverCompaniesStream(
     }
   }
 
+  // Drain any remaining buffered event (stream may close without trailing \n\n)
+  if (buffer.trim()) {
+    let eventType = "";
+    let dataStr = "";
+    for (const line of buffer.split("\n")) {
+      if (line.startsWith("event:")) eventType = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+    }
+    if (eventType === "done" && dataStr) {
+      result = JSON.parse(dataStr) as DiscoverCompaniesResponse;
+    } else if (eventType === "error" && dataStr) {
+      const parsed = JSON.parse(dataStr);
+      throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
+    }
+  }
+
   if (!result) throw { message: "Stream ended without a result" };
   return result;
 }
@@ -430,6 +446,22 @@ export async function discoverRolesStream(
         const parsed = JSON.parse(dataStr);
         throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
       }
+    }
+  }
+
+  // Drain any remaining buffered event (stream may close without trailing \n\n)
+  if (buffer.trim()) {
+    let eventType = "";
+    let dataStr = "";
+    for (const line of buffer.split("\n")) {
+      if (line.startsWith("event:")) eventType = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+    }
+    if (eventType === "done" && dataStr) {
+      result = JSON.parse(dataStr) as RolesResponse;
+    } else if (eventType === "error" && dataStr) {
+      const parsed = JSON.parse(dataStr);
+      throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
     }
   }
 
@@ -990,6 +1022,27 @@ export interface MeResponse {
 
 export async function getMe(): Promise<MeResponse> {
   const { data } = await api.get<MeResponse>("/me");
+  return data;
+}
+
+// ─── Analytics ──────────────────────────────────────────────────────────────
+
+export interface AnalyticsSummary {
+  days: number;
+  total_views: number;
+  unique_sessions: number;
+  unique_users: number;
+  views_per_page: Array<{ page: string; views: number }>;
+  top_referrers: Array<{ referrer: string; count: number }>;
+  views_over_time: Array<{ date: string; views: number }>;
+}
+
+export async function getAnalyticsSummary(
+  days = 30
+): Promise<AnalyticsSummary> {
+  const { data } = await api.get<AnalyticsSummary>("/analytics/summary", {
+    params: { days },
+  });
   return data;
 }
 
