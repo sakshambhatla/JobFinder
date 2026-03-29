@@ -89,17 +89,19 @@ export default function PipelineCard({ entry, onEdit, onArchive, onDelete, isDra
           )}
           {showMenu && (
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  draggable={false}
-                  onDragStart={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="opacity-30 hover:opacity-80 transition-opacity rounded p-0.5 hover:bg-white/10"
-                >
-                  <span className="material-symbols-outlined text-[16px] text-white/50">more_vert</span>
-                </button>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    draggable={false}
+                    onDragStart={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="opacity-30 hover:opacity-80 transition-opacity rounded p-0.5 hover:bg-white/10"
+                  />
+                }
+              >
+                <span className="material-symbols-outlined text-[16px] text-white/50">more_vert</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
