@@ -7,6 +7,7 @@ import { PipelinePage } from "@/components/PipelinePage";
 import { OffersPage } from "@/components/OffersPage";
 import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
 import { DebugLogPanel } from "@/components/DebugLogPanel";
+import { RenderLogPanel } from "@/components/RenderLogPanel";
 import { TopNav } from "@/components/TopNav";
 import { SideNav } from "@/components/SideNav";
 import { MobileNav } from "@/components/MobileNav";
@@ -98,6 +99,7 @@ function App() {
         <div className="max-w-6xl mx-auto space-y-16">
           {renderContent()}
           {!showPipeline && (mode === "local" || isAtLeast("devtest")) && <DebugLogPanel />}
+          {(mode === "local" || isAtLeast("devtest")) && <RenderLogPanel />}
         </div>
       </main>
 
