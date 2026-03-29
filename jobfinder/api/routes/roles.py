@@ -736,7 +736,7 @@ async def discover_roles_stream(
         finally:
             set_run_context(None)
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), sep="\n")
 
 
 @router.get("/roles/unfiltered")
@@ -1046,7 +1046,7 @@ async def stream_browser_fetch(
             request.app.state.running_agents.pop((user_id, entry["name"]), None)
             set_run_context(None)
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), sep="\n")
 
 
 @router.delete("/roles/fetch-browser/{company_name}")

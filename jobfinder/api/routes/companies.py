@@ -295,7 +295,7 @@ async def discover_companies_stream(
             logger.exception("Unexpected error in company discovery stream")
             yield {"event": "error", "data": json.dumps({"detail": str(exc)})}
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), sep="\n")
 
 
 @router.get("/companies/registry")
