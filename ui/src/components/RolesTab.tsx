@@ -955,7 +955,6 @@ export function RolesTab() {
       const hasFilters = titleFilter || locationFilter || postedWithinValue;
       return discoverRolesStream({
         resume,
-        refresh: true,
         use_cache: useCache,
         company_names: sourceMode === "registry" ? selectedNames : undefined,
         company_run_id: sourceMode === "pick-run" ? selectedRunId : undefined,
