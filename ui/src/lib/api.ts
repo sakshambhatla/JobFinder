@@ -1025,6 +1025,27 @@ export async function getMe(): Promise<MeResponse> {
   return data;
 }
 
+// ─── Analytics ──────────────────────────────────────────────────────────────
+
+export interface AnalyticsSummary {
+  days: number;
+  total_views: number;
+  unique_sessions: number;
+  unique_users: number;
+  views_per_page: Array<{ page: string; views: number }>;
+  top_referrers: Array<{ referrer: string; count: number }>;
+  views_over_time: Array<{ date: string; views: number }>;
+}
+
+export async function getAnalyticsSummary(
+  days = 30
+): Promise<AnalyticsSummary> {
+  const { data } = await api.get<AnalyticsSummary>("/analytics/summary", {
+    params: { days },
+  });
+  return data;
+}
+
 // ─── Browser Agent ───────────────────────────────────────────────────────────
 
 /** Send a kill signal to a running browser agent. */

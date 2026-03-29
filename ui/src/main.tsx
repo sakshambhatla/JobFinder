@@ -6,15 +6,22 @@ import { queryClient } from '@/lib/queryClient'
 import { ModeProvider } from '@/contexts/ModeContext'
 import { AuthProvider } from '@/components/AuthProvider'
 import { RoleProvider } from '@/contexts/RoleContext'
+import { usePageView } from '@/lib/usePageView'
 import { LandingPage } from '@/components/LandingPage'
 import { AboutPage } from '@/components/AboutPage'
 import { PrivacyPolicyPage } from '@/components/PrivacyPolicyPage'
 import './index.css'
 import App from './App.tsx'
 
+function PageViewTracker() {
+  usePageView();
+  return null;
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
+      <PageViewTracker />
       <ModeProvider>
         <AuthProvider>
           <QueryClientProvider client={queryClient}>

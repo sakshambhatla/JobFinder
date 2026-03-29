@@ -107,3 +107,14 @@ class AnalyzeOfferRequest(BaseModel):
 class SaveOfferContextRequest(BaseModel):
     company_name: str
     personal_context: str
+
+
+# ── Analytics ──────────────────────────────────────────────────────────────
+
+class PageViewRequest(BaseModel):
+    session_id: str
+    page_path: str
+    referrer: str | None = None
+    user_agent: str | None = None
+    screen_width: int | None = None
+    screen_height: int | None = None

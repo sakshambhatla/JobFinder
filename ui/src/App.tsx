@@ -5,6 +5,7 @@ import { CompaniesTab } from "@/components/CompaniesTab";
 import { RolesTab } from "@/components/RolesTab";
 import { PipelinePage } from "@/components/PipelinePage";
 import { OffersPage } from "@/components/OffersPage";
+import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
 import { DebugLogPanel } from "@/components/DebugLogPanel";
 import { TopNav } from "@/components/TopNav";
 import { SideNav } from "@/components/SideNav";
@@ -25,6 +26,7 @@ function App() {
   const navigate = useNavigate();
   const showPipeline = location.pathname.startsWith("/app/pipeline");
   const showOffers = location.pathname === "/app/pipeline/offers";
+  const showAnalytics = location.pathname === "/app/analytics";
 
   // ── Conditional renders ─────────────────────────────────────────────────────
 
@@ -53,11 +55,17 @@ function App() {
   const handleSideNavClick = (id: string) => {
     if (id === "pipeline") navigate("/app/pipeline");
     else if (id === "offers") navigate("/app/pipeline/offers");
+    else if (id === "analytics") navigate("/app/analytics");
   };
 
-  const sideNavActiveItem = showOffers ? "offers" : "pipeline";
+  const sideNavActiveItem = showAnalytics
+    ? "analytics"
+    : showOffers
+      ? "offers"
+      : "pipeline";
 
   const renderContent = () => {
+    if (showAnalytics) return <AnalyticsDashboard />;
     if (showOffers) return <OffersPage />;
     if (showPipeline) return <PipelinePage />;
 
