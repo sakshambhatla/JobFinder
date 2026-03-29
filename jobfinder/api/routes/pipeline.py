@@ -312,6 +312,7 @@ async def sync_pipeline(
     entries: list[dict] = store.read("pipeline_entries.json") or []
 
     google_connected = False
+    google_auth_expired = False
     gmail_signals: list[dict] = []
     calendar_signals: list[dict] = []
 
@@ -323,7 +324,7 @@ async def sync_pipeline(
         if tokens and tokens.get("refresh_token"):
             google_connected = True
 
-            from jobfinder.pipeline.gmail import scan_gmail
+            from jobfinder.pipeline.gmail import GoogleAuthError, scan_gmail
             from jobfinder.pipeline.calendar import scan_calendar
 
             lookback = min(max(req.lookback_days if req else 3, 1), 14)
@@ -344,17 +345,22 @@ async def sync_pipeline(
                 except ValueError:
                     pass
 
-            raw_gmail = await asyncio.to_thread(
-                scan_gmail, tokens, entries,
-                lookback_days=lookback, custom_phrases=phrases,
-                api_key=gmail_api_key, provider=gmail_provider,
-            )
-            gmail_signals = [s.to_dict() for s in raw_gmail]
+            try:
+                raw_gmail = await asyncio.to_thread(
+                    scan_gmail, tokens, entries,
+                    lookback_days=lookback, custom_phrases=phrases,
+                    api_key=gmail_api_key, provider=gmail_provider,
+                )
+                gmail_signals = [s.to_dict() for s in raw_gmail]
 
-            raw_calendar = await asyncio.to_thread(
-                scan_calendar, tokens, entries, past_days=lookback,
-            )
-            calendar_signals = [s.to_dict() for s in raw_calendar]
+                raw_calendar = await asyncio.to_thread(
+                    scan_calendar, tokens, entries, past_days=lookback,
+                )
+                calendar_signals = [s.to_dict() for s in raw_calendar]
+            except GoogleAuthError as exc:
+                log.warning("Google auth expired for user %s: %s", user_id, exc)
+                google_connected = False
+                google_auth_expired = True
 
     # ── LLM reasoning (requires user's API key) ──────────────────────────
     llm_available = False
@@ -431,6 +437,7 @@ async def sync_pipeline(
         "new_companies": new_companies,
         "summary": summary,
         "google_connected": google_connected,
+        "google_auth_expired": google_auth_expired,
         "llm_available": llm_available,
     }
 

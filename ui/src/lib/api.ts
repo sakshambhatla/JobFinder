@@ -867,6 +867,7 @@ export interface SyncResult {
   new_companies: PipelineSuggestion[];
   summary: string | null;
   google_connected: boolean;
+  google_auth_expired: boolean;
   llm_available: boolean;
 }
 

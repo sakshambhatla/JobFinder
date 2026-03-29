@@ -11,6 +11,8 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
+from jobfinder.pipeline.gmail import GoogleAuthError, _is_auth_error
+
 log = logging.getLogger(__name__)
 
 _GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -66,8 +68,11 @@ def _build_calendar_service(tokens: dict[str, str]):
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-        except Exception:
-            log.warning("Failed to refresh Google access token for Calendar")
+        except Exception as exc:
+            raise GoogleAuthError(
+                "Google access token expired and could not be refreshed. "
+                "Please reconnect your Google account."
+            ) from exc
 
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
@@ -140,6 +145,8 @@ def scan_calendar(
     """
     try:
         service = _build_calendar_service(tokens)
+    except GoogleAuthError:
+        raise
     except Exception as exc:
         log.error("Failed to build Calendar service: %s", exc)
         return []
@@ -171,6 +178,10 @@ def scan_calendar(
             .execute()
         )
     except Exception as exc:
+        if _is_auth_error(exc):
+            raise GoogleAuthError(
+                "Google credentials expired. Please reconnect your Google account."
+            ) from exc
         log.warning("Calendar events.list failed: %s", exc)
         return []
 

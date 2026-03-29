@@ -287,16 +287,44 @@ export function LandingPage() {
                 </div>
               </div>
 
-              {/* Feature 3: Ghostwriter CRM */}
+              {/* Feature 3: Offer Evaluation */}
               <div
                 className="md:col-span-4 rounded-xl p-10 border hover:border-[rgba(163,166,255,0.3)] transition-all"
                 style={{ background: "#1a1a1a", borderColor: "rgba(72,72,71,0.1)" }}
               >
-                <div className="text-4xl mb-6" style={{ color: "#d7d4f0" }}>&#x0040;</div>
-                <h3 className="text-2xl font-bold mb-4">Ghostwriter CRM</h3>
-                <p className="leading-relaxed" style={{ color: "#adaaaa" }}>
-                  Automated personalized outreach that sounds like you—only better. Manage your entire networking pipeline on autopilot.
+                <div className="text-4xl mb-6" style={{ color: "#a3a6ff" }}>&#x1F4CA;</div>
+                <h3 className="text-2xl font-bold mb-4">Offer Evaluation & Assistance</h3>
+                <p className="leading-relaxed mb-6" style={{ color: "#adaaaa" }}>
+                  Personalized offer analysis across culture, growth, and compensation. We weigh the pros and cons of every detail so you can join the right team with total confidence.
                 </p>
+                {/* Mini scorecard mockup */}
+                <div className="rounded-lg p-4 flex flex-col gap-3" style={{ background: "#0d0d0d", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-label uppercase tracking-widest" style={{ fontSize: "9px", color: "rgba(173,170,170,0.5)" }}>Offer Analysis</span>
+                    <span className="font-label uppercase tracking-widest rounded px-2 py-0.5" style={{ fontSize: "9px", background: "#a3a6ff", color: "#0d0d0d" }}>AI Insight</span>
+                  </div>
+                  {[
+                    { label: "Business Trajectory", score: 3, color: "#a3a6ff" },
+                    { label: "Management Quality",  score: 2, color: "#f87171" },
+                    { label: "Engineering Culture", score: 4, color: "#53ddfc" },
+                  ].map(({ label, score, color }) => (
+                    <div key={label}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-label uppercase tracking-widest" style={{ fontSize: "8px", color: "rgba(173,170,170,0.5)" }}>{label}</span>
+                        <span className="font-label font-bold" style={{ fontSize: "9px", color }}>{score}/5</span>
+                      </div>
+                      <div className="flex gap-1">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <div key={i} className="h-1 flex-1 rounded-full" style={{ background: i < score ? color : "rgba(255,255,255,0.08)" }} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="mt-1 rounded p-2" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.04)" }}>
+                    <span className="font-label font-bold uppercase tracking-widest mr-1" style={{ fontSize: "8px", color: "#adaaaa" }}>Verdict:</span>
+                    <span style={{ fontSize: "9px", color: "#adaaaa" }}>Strong growth trajectory; check vesting acceleration clauses.</span>
+                  </div>
+                </div>
               </div>
 
               {/* Feature 4: Application Pipeline Tracking */}

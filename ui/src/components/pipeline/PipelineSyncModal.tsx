@@ -218,7 +218,7 @@ export default function PipelineSyncModal({
 
   if (!syncResult) return null;
 
-  const { summary, google_connected, llm_available, gmail_signals, calendar_signals } =
+  const { summary, google_connected, google_auth_expired, llm_available, gmail_signals, calendar_signals } =
     syncResult;
 
   const getRecommendation = (ju: JobUpdate): Recommendation =>
@@ -275,6 +275,11 @@ export default function PipelineSyncModal({
 
         {/* Summary + badges */}
         <div className="px-6 space-y-3">
+          {google_auth_expired && (
+            <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/30 p-3 text-sm text-yellow-300">
+              Google tokens expired — your Gmail and Calendar could not be scanned. Please sign out and sign back in with Google to reconnect.
+            </div>
+          )}
           {summary && (
             <div className="rounded-lg bg-white/5 p-3 text-sm text-white/70 border border-white/5">
               {summary}
@@ -282,9 +287,9 @@ export default function PipelineSyncModal({
           )}
           <div className="flex gap-2 flex-wrap text-xs">
             <span
-              className={`px-2 py-0.5 rounded-full ${google_connected ? "bg-green-500/20 text-green-400" : "bg-white/10 text-white/40"}`}
+              className={`px-2 py-0.5 rounded-full ${google_connected ? "bg-green-500/20 text-green-400" : google_auth_expired ? "bg-yellow-500/20 text-yellow-400" : "bg-white/10 text-white/40"}`}
             >
-              {google_connected ? "Google Connected" : "Google Not Connected"}
+              {google_connected ? "Google Connected" : google_auth_expired ? "Google Reconnect Required" : "Google Not Connected"}
             </span>
             {google_connected && (
               <>
@@ -306,7 +311,9 @@ export default function PipelineSyncModal({
 
         {jobUpdates.length === 0 ? (
           <div className="flex-1 flex items-center justify-center py-12 text-white/40 text-sm">
-            {google_connected
+            {google_auth_expired
+              ? "Google tokens expired — sign out and back in with Google to reconnect."
+              : google_connected
               ? "No signals detected from Gmail or Calendar."
               : "Connect your Google account to sync emails and calendar events."}
           </div>

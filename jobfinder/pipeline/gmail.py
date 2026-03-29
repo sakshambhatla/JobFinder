@@ -25,6 +25,11 @@ from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 
+
+class GoogleAuthError(Exception):
+    """Raised when Google OAuth credentials are expired or missing required fields."""
+
+
 # Google API client ID for token refresh
 _GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
 
@@ -89,6 +94,18 @@ class _RawEmail:
     pass_name: str     # "pass_1_known" | "pass_2_broad" | "pass_3_custom"
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    """Return True if the exception looks like a Google auth/credentials error."""
+    msg = str(exc).lower()
+    return (
+        "credentials do not contain" in msg
+        or "invalid_grant" in msg
+        or "token has been expired" in msg
+        or "token expired" in msg
+        or "unauthorized" in msg and "google" in msg
+    )
+
+
 # ── Gmail service ──────────────────────────────────────────────────────────────
 
 
@@ -110,8 +127,11 @@ def _build_gmail_service(tokens: dict[str, str]):
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-        except Exception:
-            log.warning("Failed to refresh Google access token; using existing token")
+        except Exception as exc:
+            raise GoogleAuthError(
+                "Google access token expired and could not be refreshed. "
+                "Please reconnect your Google account."
+            ) from exc
 
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
@@ -536,6 +556,10 @@ def _search_and_extract_linkedin(
             .execute()
         )
     except Exception as exc:
+        if _is_auth_error(exc):
+            raise GoogleAuthError(
+                "Google credentials expired. Please reconnect your Google account."
+            ) from exc
         log.warning("LinkedIn Gmail search failed: %s", exc)
         return []
 
