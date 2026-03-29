@@ -76,6 +76,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.warn("[Auth] Failed to store Google tokens:", err);
           });
         }
+
+        // After OAuth, Supabase may land the user at the Site URL (/) instead of /app
+        // because the Supabase dashboard Redirect URL allowlist doesn't include /app.
+        // Redirect to /app so users enter the app immediately after sign-in.
+        if (!window.location.pathname.startsWith("/app")) {
+          window.location.href = "/app";
+        }
       }
 
       if (_event === "SIGNED_OUT") {
