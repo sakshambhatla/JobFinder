@@ -56,12 +56,26 @@ export default function PipelineCard({ entry, onEdit, onArchive, onDelete, isDra
               </span>
             )}
           </div>
+          {badgeMeta && (
+            <div className="mt-1">
+              <span
+                className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                style={{
+                  background: `${badgeMeta.color}22`,
+                  color: badgeMeta.color,
+                  border: `1px solid ${badgeMeta.color}44`,
+                }}
+              >
+                {badgeMeta.label}
+              </span>
+            </div>
+          )}
           {entry.tags.length > 0 && (
             <div className="flex flex-nowrap gap-1 mt-1 overflow-hidden">
               {entry.tags.map((tag) => (
                 <span
                   key={tag}
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium text-white/40 bg-white/5 border border-white/10 capitalize"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-white/40 bg-white/5 border border-white/10 capitalize"
                 >
                   {tag}
                 </span>
@@ -75,18 +89,6 @@ export default function PipelineCard({ entry, onEdit, onArchive, onDelete, isDra
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {badgeMeta && (
-            <span
-              className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
-              style={{
-                background: `${badgeMeta.color}22`,
-                color: badgeMeta.color,
-                border: `1px solid ${badgeMeta.color}44`,
-              }}
-            >
-              {badgeMeta.label}
-            </span>
-          )}
           {showMenu && (
             <DropdownMenu>
               <DropdownMenuTrigger
