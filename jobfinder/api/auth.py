@@ -90,3 +90,25 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     return (_decode_jwt(raw_token), raw_token)
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    token: str | None = Query(None),
+) -> tuple[str, str] | None:
+    """Like ``get_current_user`` but returns ``None`` instead of raising 401.
+
+    Use for endpoints that accept both anonymous and authenticated requests
+    (e.g., page-view analytics tracking).
+    """
+    if not os.environ.get("SUPABASE_URL"):
+        return None
+
+    raw_token = (credentials.credentials if credentials else None) or token
+    if not raw_token:
+        return None  # anonymous visitor — no error
+
+    try:
+        return (_decode_jwt(raw_token), raw_token)
+    except Exception:
+        return None  # invalid token — treat as anonymous

@@ -1,3 +1,5 @@
+import { useRole } from "@/contexts/RoleContext";
+
 interface SideNavProps {
   activeItem?: string;
   onItemClick?: (id: string) => void;
@@ -9,11 +11,14 @@ const navItems = [
   { label: "Pipeline", icon: "description", id: "pipeline" },
   { label: "Offers", icon: "assignment_turned_in", id: "offers" },
   { label: "Integrations", icon: "extension", id: "integrations" },
+  { label: "Analytics", icon: "bar_chart", id: "analytics", minRole: "devtest" as const },
 ];
 
-const WIRED_ITEMS = new Set(["pipeline", "offers"]);
+const WIRED_ITEMS = new Set(["pipeline", "offers", "analytics"]);
 
 export function SideNav({ activeItem = "pipeline", onItemClick }: SideNavProps) {
+  const { isAtLeast } = useRole();
+
   return (
     <aside className="hidden md:flex flex-col py-10 px-6 gap-4 h-full w-64 fixed left-0 top-20 bg-[#0e0e0e]">
       <div className="mb-8 px-2">
@@ -27,6 +32,7 @@ export function SideNav({ activeItem = "pipeline", onItemClick }: SideNavProps) 
 
       <nav className="space-y-2">
         {navItems.map((item) => {
+          if ("minRole" in item && item.minRole && !isAtLeast(item.minRole)) return null;
           const active = item.id === activeItem;
           const wired = WIRED_ITEMS.has(item.id);
           return (
