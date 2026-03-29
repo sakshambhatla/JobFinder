@@ -257,13 +257,13 @@ export async function discoverCompaniesStream(
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    const parts = buffer.split("\n\n");
+    const parts = buffer.split(/\r?\n\r?\n/);
     buffer = parts.pop() ?? "";
 
     for (const part of parts) {
       let eventType = "";
       let dataStr = "";
-      for (const line of part.split("\n")) {
+      for (const line of part.split(/\r?\n/)) {
         if (line.startsWith("event:")) eventType = line.slice(6).trim();
         else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
       }
@@ -283,19 +283,22 @@ export async function discoverCompaniesStream(
     }
   }
 
-  // Drain any remaining buffered event (stream may close without trailing \n\n)
+  // Drain any remaining buffered event (stream may close without trailing blank line)
   if (buffer.trim()) {
-    let eventType = "";
-    let dataStr = "";
-    for (const line of buffer.split("\n")) {
-      if (line.startsWith("event:")) eventType = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
-    }
-    if (eventType === "done" && dataStr) {
-      result = JSON.parse(dataStr) as DiscoverCompaniesResponse;
-    } else if (eventType === "error" && dataStr) {
-      const parsed = JSON.parse(dataStr);
-      throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
+    for (const part of buffer.split(/\r?\n\r?\n/)) {
+      if (!part.trim()) continue;
+      let eventType = "";
+      let dataStr = "";
+      for (const line of part.split(/\r?\n/)) {
+        if (line.startsWith("event:")) eventType = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+      }
+      if (eventType === "done" && dataStr) {
+        result = JSON.parse(dataStr) as DiscoverCompaniesResponse;
+      } else if (eventType === "error" && dataStr) {
+        const parsed = JSON.parse(dataStr);
+        throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
+      }
     }
   }
 
@@ -424,13 +427,13 @@ export async function discoverRolesStream(
     buffer += decoder.decode(value, { stream: true });
 
     // Parse SSE events from the buffer
-    const parts = buffer.split("\n\n");
+    const parts = buffer.split(/\r?\n\r?\n/);
     buffer = parts.pop() ?? "";
 
     for (const part of parts) {
       let eventType = "";
       let dataStr = "";
-      for (const line of part.split("\n")) {
+      for (const line of part.split(/\r?\n/)) {
         if (line.startsWith("event:")) eventType = line.slice(6).trim();
         else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
         // Ignore comments (keepalive pings starting with ":")
@@ -451,19 +454,22 @@ export async function discoverRolesStream(
     }
   }
 
-  // Drain any remaining buffered event (stream may close without trailing \n\n)
+  // Drain any remaining buffered event (stream may close without trailing blank line)
   if (buffer.trim()) {
-    let eventType = "";
-    let dataStr = "";
-    for (const line of buffer.split("\n")) {
-      if (line.startsWith("event:")) eventType = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
-    }
-    if (eventType === "done" && dataStr) {
-      result = JSON.parse(dataStr) as RolesResponse;
-    } else if (eventType === "error" && dataStr) {
-      const parsed = JSON.parse(dataStr);
-      throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
+    for (const part of buffer.split(/\r?\n\r?\n/)) {
+      if (!part.trim()) continue;
+      let eventType = "";
+      let dataStr = "";
+      for (const line of part.split(/\r?\n/)) {
+        if (line.startsWith("event:")) eventType = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+      }
+      if (eventType === "done" && dataStr) {
+        result = JSON.parse(dataStr) as RolesResponse;
+      } else if (eventType === "error" && dataStr) {
+        const parsed = JSON.parse(dataStr);
+        throw { response: { data: { detail: parsed.detail } }, message: parsed.detail };
+      }
     }
   }
 
