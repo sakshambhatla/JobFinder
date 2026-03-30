@@ -249,28 +249,10 @@ def discover_roles(
                             on_progress(all_roles, still_flagged)
                         continue  # don't re-add to flagged
 
-                # Find company domain from the original companies list
-                company_domain = None
-                for c in companies:
-                    if c.name.lower() == fc.name.lower() and c.career_page_url:
-                        try:
-                            from urllib.parse import urlparse
-                            parsed = urlparse(c.career_page_url)
-                            if parsed.hostname:
-                                # Strip www. prefix for cleaner domain matching
-                                domain = parsed.hostname
-                                if domain.startswith("www."):
-                                    domain = domain[4:]
-                                company_domain = domain
-                        except Exception:
-                            pass
-                        break
-
                 with console.status(f"Searching TheirStack for {fc.name}..."):
                     try:
                         ts_roles = search_jobs(
                             fc.name,
-                            company_domain=company_domain,
                             filters=config.role_filters,
                             config=config,
                             api_key=ts_api_key,
